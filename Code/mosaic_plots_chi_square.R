@@ -117,7 +117,7 @@ dat_cyano <- dat2 %>%
   ungroup() %>%
   mutate(response.prop = response.count/sum(count)) %>%
   ungroup() %>%
-  separate(x_axis_barplot,c("increase_decrease_mosaic","increase_phyto"), remove = FALSE) %>%
+  separate(x_axis_barplot, c("increase_decrease_mosaic","increase_phyto"), remove = FALSE) %>%
   mutate(trophic_status_mosaic = factor(trophic_status_mosaic, levels = c("oligo/mesotrophic","eu/hypereutrophic","not reported")))
 
 # New facet label names for water level/response variable

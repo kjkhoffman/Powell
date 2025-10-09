@@ -463,3 +463,128 @@ summary(logregform_phyto)
 logregform_cyano <-  glm(formula=response_binary ~ prop_delta_wl, data=logregdata_cyano, family=binomial)
 summary(logregform_cyano)
 ```
+
+```{r log reg for poster, new colors}
+cyanodecreasedata <- boxplotdata2 %>% 
+  select(prop_delta_wl, combined_cyano_response, combined_cyano_response_binary, study_id) %>% 
+  filter(!is.na(prop_delta_wl)) %>%
+  filter(!is.na(combined_cyano_response_binary)) %>% 
+  filter(prop_delta_wl<0) %>% 
+  rename(response_binary = combined_cyano_response_binary, 
+         response = combined_cyano_response) %>% 
+  mutate(type = "cyano")
+
+cyanoincreasedata <- boxplotdata2 %>% 
+  select(prop_delta_wl, combined_cyano_response, combined_cyano_response_binary, study_id) %>% 
+  filter(!is.na(prop_delta_wl)) %>%
+  filter(!is.na(combined_cyano_response_binary)) %>% 
+  filter(prop_delta_wl>0) %>% 
+  rename(response_binary = combined_cyano_response_binary, 
+         response = combined_cyano_response) %>% 
+  mutate(type = "cyano")
+
+phytoincreasedata <- boxplotdata2 %>% 
+  select(prop_delta_wl, combined_phyto_response, combined_phyto_response_binary, study_id) %>% 
+  filter(!is.na(prop_delta_wl)) %>% 
+  filter(!is.na(combined_phyto_response_binary)) %>% 
+  filter(prop_delta_wl>0) %>% 
+  rename(response_binary = combined_phyto_response_binary, 
+         response = combined_phyto_response) %>% 
+  mutate(type = "phyto")
+
+phytodecreasedata <- boxplotdata2 %>% 
+  select(prop_delta_wl, combined_phyto_response, combined_phyto_response_binary, study_id) %>% 
+  filter(!is.na(prop_delta_wl)) %>% 
+  filter(!is.na(combined_phyto_response_binary)) %>% 
+  filter(prop_delta_wl<0) %>% 
+  rename(response_binary = combined_phyto_response_binary, 
+         response = combined_phyto_response) %>% 
+  mutate(type = "phyto")
+  
+cyanodata <- boxplotdata2 %>% 
+  select(prop_delta_wl, combined_cyano_response, combined_cyano_response_binary, study_id) %>% 
+  filter(!is.na(prop_delta_wl)) %>%
+  filter(!is.na(combined_cyano_response_binary)) %>% 
+  # filter(prop_delta_wl<0) %>% 
+  rename(response_binary = combined_cyano_response_binary, 
+         response = combined_cyano_response) %>% 
+  mutate(type = "cyano")
+
+phytodata <- boxplotdata2 %>% 
+  select(prop_delta_wl, combined_phyto_response, combined_phyto_response_binary, study_id) %>% 
+  filter(!is.na(prop_delta_wl)) %>% 
+  filter(!is.na(combined_phyto_response_binary)) %>% 
+  # filter(prop_delta_wl<0) %>% 
+  rename(response_binary = combined_phyto_response_binary, 
+         response = combined_phyto_response) %>% 
+  mutate(type = "phyto")
+# logregdata <- rbind(cyanoincreasedata, cyanodecreasedata, phytoincreasedata, phytodecreasedata)
+logregdata <- rbind(cyanodata, phytodata)
+#"#7A524B","#3C7F29","#8DBAE9"
+
+test <- logregdata %>% ggplot(aes(x = prop_delta_wl, y = response_binary, color = as.factor(type), shape = as.factor(type))) +
+  scale_color_manual(values = c("#8DBAE9", "#7A524B"), name = "")+
+  scale_shape_manual(values = c(20, 20)) +
+  geom_point(size = 8) +
+  geom_smooth(method = "glm", 
+              method.args = list(family = "binomial"),
+              se = FALSE, linewidth = 6) + 
+  #geom_jitter()+
+ ylab("") + 
+  xlab("Proportion water level change") + 
+  theme_bw() +
+   theme(legend.position = "none") +
+  theme(text = element_text(size = 40),
+        axis.text.x = element_text(hjust = 1, size = 32), 
+        axis.title.y=element_text(angle=0, vjust = .5))
+test
+
+ggsave("~/GitHubRepos/CareyLabVT/Powell/Plots/LitReview/GCDAMP_Poster/combinedlogregression.png", plot = test, height = 8.2, width = 14.5, units = "in")
+```
+
+
+```{r bar plots}
+#management concerns
+litdata_na_expand <- litdata_na %>% 
+  cbind(mtabulate(strsplit(litdata_na$sampling_months, "; "))) %>% 
+  cbind(mtabulate(strsplit(litdata_na$mgmt_concerns, "; "))) %>% 
+  rename(concern_drawdown = drawdown, 
+         concern_flooding = flooding, 
+         concern_drought = drought, 
+         concern_waterlevelfluctuation = "water level fluctuation") %>% 
+  cbind(mtabulate(strsplit(litdata_na$mgmt_strat, "; "))) %>% 
+  rename(strat_drawdown = drawdown, 
+         strat_episw = "epilimnion selective withdrawal", 
+         strat_metasw = "metalimnion selective withdrawal", 
+         strat_hyposw = "hypolimnion selective withdrawal", 
+         strat_refill = "refill",
+         strat_flushing = "hydraulic flushing")
+
+mgmt_concerns <- c("concern_drought", "concern_drawdown", "concern_waterlevelfluctuation", "concern_flooding")
+
+concerns <- litdata_na_expand %>% 
+  select(all_of(mgmt_concerns)) %>% 
+  summarise(Flooding = sum(concern_flooding == "1"), 
+            Drought = sum(concern_drought == "1"),
+            "Water level\n fluctuation" = sum(concern_waterlevelfluctuation == "1"), 
+            Drawdown = sum(concern_drawdown == "1")) %>% 
+  pivot_longer(everything(),  names_to = "concern", values_to = "count")
+            
+mgmtconcerns <- concerns %>% 
+  ggplot(aes(x = concern, y = count, label = count)) + 
+  # geom_col(position = "dodge", fill = "#88CCEE") +
+  geom_col(position = "dodge", fill = "#8DBAE9") +
+  geom_text(position = position_dodge(width = 0.9),
+            hjust = .5, vjust = 2, color = "white", size = 8) +  
+  xlab("Management Concern") +
+  ylab("Number of Papers") +  
+  theme_bw() +
+  theme(text = element_text(size = 28),
+        axis.text.x = element_text(angle = 0, hjust = .5, size = 20))
+
+mgmtconcerns
+ggsave("~/GitHubRepos/CareyLabVT/Powell/Plots/LitReview/GCDAMP_Poster/managementconcerns.png", plot = mgmtconcerns, height = 6.2, width = 6.2, units = "in")
+
+
+```
+

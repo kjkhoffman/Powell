@@ -14,7 +14,7 @@ pacman::p_load(tidyverse, lubridate, gsheet, scales)
 
 ```{r read in phyto data}
 profile_data <- read_csv("~/GitHubRepos/CareyLabVT/Powell/Data/ProfileData_LakePowell_1965-2022.csv")
-phyto_data <- read_csv("~/GitHubRepos/CareyLabVT/Powell/Data/PhytoplanktonData_LakePowell_1992-2022.csv", locale=locale(encoding="latin1"))
+phyto_data <- read_csv("~/GitHubRepos/CareyLabVT/Powell/Data/Lake Powell Data/PhytoplanktonData_LakePowell_1992-2022.csv", locale=locale(encoding="latin1"))
 site_visits <- read_csv("~/GitHubRepos/CareyLabVT/Powell/Data/SiteVisitData_LakePowell_1964-2022.csv")
 ```
 
@@ -93,6 +93,47 @@ phyto_analyze %>%
   #scale_x_date(date_breaks = "1 month", date_labels = "%b")+
     theme(axis.text.x=element_text(angle=90,hjust=1)) 
 #ggsave("~/GitHubRepos/CareyLabVT/Powell/Plots/phytodivisions_atdam_1993-2022_propabundance.png", width = 7.5, height = 5, units ="in")
+
+phyto_analyze <- phyto_data %>% 
+  filter(StationID%in%forebay) %>% 
+  filter(Division%in%phytos)
+
+cyanos <- phyto_data |> 
+  filter(Division == "Cyanobacteria") |> 
+  filter(StationID%in%forebay) |> 
+  mutate(day = lubridate::mdy_hm(CollectionDateTime)) |> 
+  mutate(day = date(day))
+
+cyanos2 <- cyanos |> 
+  pivot_wider(names_from = GenusSpecies, values_from = Abundance, values_fill = 0)
+  group_by(year(day)) |>
+  ggplot(aes(day, Abundance)) +
+  geom_col(aes(fill = GenusSpecies)) + 
+  facet_wrap(~year(day), scales = "free_x")
+
+ggplot(cyanos, aes(fill=GenusSpecies, y=Abundance, x=year(day))) + 
+    geom_bar(position="stack", stat="identity", show.legend = F) + theme_bw()
+
+unique(cyanos$GenusSpecies)
+
+mutate()
+c("Aphanizomenon", "Chroococcus", "Microcystis", "Aphanocapsa", "Pseudanabaena", "Gomphosphaeria", "Snowella", "Dolichospermum", "Planktolyngbya", "Limnothrix", "Cylindrospermopsis", "Spirulina", 
+  "Woronichinia", "Oscillatoria", "Aphanothece", "Planktothrix", "Lyngbya", "Komvorophon", 
+  "Heteroleibleinia", "Anabaena", "Merismopedia", "Aphanothece", "Leptolyngbya", 
+  "Gloeothece")         
+
+cyanos |> 
+  filter(year(day) == "1998"|year(day) == "2005") %>% 
+  ggplot(aes(day, Abundance)) +
+    geom_col(aes(fill = GenusSpecies)) + 
+  facet_wrap(~year(day), scales = "free_x") +
+# scale_fill_manual(values = c(phyto_colors), name="Division",
+#                        breaks=c("Bacillariophyta","Chlorophyta", "Chrysophyta", "Cryptophyta", "Euglenophyta", "Pyrrophyta", "Cyanobacteria")) +
+  theme_bw()+
+  labs(x = "Collection Dates", y = "Total Abundance")+
+  theme(axis.text.x=element_text(angle=90,hjust=1))
+
+test
 ```
 
 ```{r}
