@@ -6,6 +6,9 @@ format: html
 
 libraries for the whole script!
 ```{r packages}
+# recommend to add lines to install.packages if this script is going to be part
+# of the published repo when the manuscript is submitted
+
 library(janitor)
 library(ggplot2)
 library(tidyverse)
@@ -24,7 +27,7 @@ I preprocessed colnames for data.
 
 ```{r read in data}
 #data <- read.csv("~/GitHubRepos/CareyLabVT/Powell/Systematic/SRE_26Aug25_covonly.csv")
-data1 <- read.csv("~/GitHubRepos/CareyLabVT/Powell/Systematic/Combined_08Oct.csv")
+data1 <- read.csv("./Combined_08Oct.csv")
 data1 <- clean_names(data1)
 head(data1)
 ```
@@ -233,6 +236,7 @@ prop_dl |>
  
 # mutate(prop_delta_wl = /depth_m) %>% 
 ```
+
 ```{r}
 
 #27Aug25 this currently loses a number of reservoirs because they have multiple responses recorded. Anything that does not fit "no significant response" an increase or a decrease is excluded. 
@@ -249,7 +253,8 @@ boxplotdata2 <- prop_dl %>%  #changed 0 and 1 for phyto_wl_increase :( after pos
                                 ifelse(decrease_phyto_response == "Increase in phytoplankton", 1, NA)))) %>%
   # mutate(combined_phyto_response_text = decrease_phyto_response %>% 
   #          is.na() %>% 
-  #          ifelse(increase_phyto_response, decrease_phyto_response)) %>% 
+  #          ifelse(increase_phyto_response, decrease_phyto_response)) %>%
+  # MEL NOTE: make sure we are proceeding from most specific to most general case here
     mutate(combined_phyto_response_binary = case_when(
   is.na(phyto_binary_decrease) & prop_delta_wl < 0 ~ NA_real_,
   is.na(phyto_binary_decrease) ~ phyto_binary_increase,
@@ -315,6 +320,10 @@ cyano_box_2 <- boxplotdata2 %>%
         axis.text.x = element_text(angle = 45, hjust = 1, size = 16))
   # scale_x_discrete(limits=c("0", "1")) +
   # scale_fill_discrete(name = "test", labels = c("Decrease in cyanobacteria in response to water level decreases", "Increase in cyanobacteria in response to water level decreases"))
+
+# MEL NOTE: I got an error for this figure
+# Error in `palette()`:
+# ! Insufficient values in manual scale. 10 needed but only 5 provided.
 cyano_box_2
 
 phyto_box_2 <- boxplotdata2 %>% 
@@ -373,6 +382,7 @@ cyanobox_wlincrease <- boxplotdata2 %>%
   theme(text = element_text(size = 20),
         axis.text.x = element_text(angle = 45, hjust = 1, size = 16))
 
+# MEL NOTE: not sure I understand why there are multiple boxes for increases and decreases
 cyanobox_wldecrease <- boxplotdata2 %>% 
   subset(!is.na(cyano_response_wl_down)) %>% 
   subset(!is.na(prop_alldelta_wl_decrease)) %>%
@@ -386,6 +396,7 @@ cyanobox_wldecrease <- boxplotdata2 %>%
   theme(text = element_text(size = 20),
         axis.text.x = element_text(angle = 45, hjust = 1, size = 16))
 
+# MEL NOTE: didn't find these objects in the environment
 cyanobox_wlincrease
 cyanobox_wldecrease
 ```
@@ -1243,6 +1254,11 @@ dat2 <- bind_rows(dat_no_fluctuation_studies, fluctuation_studies_keep_increase)
 #             increase_decrease_mosaic == "Decrease" & decrease_phyto_response == "Decrease" ~ "no"))
 # 
 # write.csv(dat2,"./Data/mosaic_plot_data_9OCT25.csv", row.names = FALSE)
+
+# MEL NOTE: Katie can you remind me why this additional code is needed? (lines 1260-1303)
+# especially because it is only done for phytoplankton and not cyanobacteria -
+# is all of this to be able to show 0 studies falling into the phyto increase when
+# water level increases in eu/hypereutrophic lakes?
 
 dat_phyto1 <- dat2 %>%
   filter(!increase_phyto == "not reported") %>%
