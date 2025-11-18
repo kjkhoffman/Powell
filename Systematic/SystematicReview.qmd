@@ -34,6 +34,14 @@ data_excl <- init_data |>
   filter(!name_yr %in% c("Beaver 2013","Jia 2022","Cao 2016","Wang 2022","Kisand 2004", "Hart 2004")) |> 
   filter(!title %in% c("Steady-state assemblages in a Mediterranean hypertrophic reservoir. The role of Microcystis ecomorphological variability in maintaining an apparent equilibrium")) #Naselli-Flores 2003
 #Data is either duplicated or more data is available in Hart 2006, so excluding Hart 2004
+#Beaver no WL data
+#Jia 
+
+keep <- init_data |> 
+  filter(name_yr %in% c("Beaver 2013","Jia 2022","Cao 2016","Wang 2022","Kisand 2004", "Hart 2004")) |> 
+  filter(!title %in% c("Steady-state assemblages in a Mediterranean hypertrophic reservoir. The role of Microcystis ecomorphological variability in maintaining an apparent equilibrium")) |> 
+  select(c(name_yr, notes))
+
 ```
 
 ```{r fix some data}
@@ -1610,8 +1618,15 @@ test <- data |>
          transparency = ifelse(grepl("transparency", phys_vars), 1, 0),
          turb = ifelse(grepl("turbidity", phys_vars), 1, 0),
          light = ifelse(grepl("PAR", phys_vars), 1, 0),    #need to pull out rainfall & precipitation, stability/, water residence time, flushing
-         tss = ifelse(grepl("total suspended solids", phys_vars), 1, 0), 
-         other_phys = ifelse(grepl("Other", phys_drive), 1, 0))
+        tss_tds = ifelse(grepl("total suspended solids|tss|tds|total dissolved solid|sediment resuspension", phys_vars), 1, 0), 
+         strat = ifelse(grepl("mix|stab|strat", phys_vars), 1, 0),
+         restime = ifelse(grepl("residence", phys_vars), 1, 0), 
+         flush_discharge = ifelse(grepl("flush|discharge", phys_vars), 1, 0), 
+         inflow = ifelse(grepl("inflow", phys_vars), 1, 0),
+         precip = ifelse(grepl("precip|rain", phys_vars), 1, 0),
+         air_temp = ifelse(grepl("air", phys_vars), 1, 0),
+         other_phys = ifelse(grepl("Other", phys_vars), 1, 0), 
+         watercolor = ifelse(grepl("water color", phys_vars), 1, 0))
 
 
 
@@ -1622,7 +1637,7 @@ unique(data$phys_vars)
 vars <- test |> select(c(filt_chla, phyto_micros, single_cyano_taxon, sensor_chla, other_bio, other_chem, tp, tn, nh4, ph, do, srp, no3, cond, metals, orp, no2, doc, din, ph, salinity))
 biovars <- test |> select(c(filt_chla, phyto_micros, single_cyano_taxon, sensor_chla, other_bio))
 chemvars <- test |> select(c(other_chem, tp, tn, nh4, ph, do, srp, no3, cond, metals, orp, no2, doc, din, ph, salinity))
-physvars <- test |> select(c(water_level, water_temp, transparency, turb, light, tss, other_phys))
+physvars <- test |> select(c(water_level, water_temp, transparency, turb, light, tss_tds, other_phys, strat, restime, flush_discharge, inflow, precip, air_temp))
 summary(vars) 
 freq_phys <- as.data.frame(colSums(physvars))
 freq <- as.data.frame(colSums(chemvars))
@@ -1681,38 +1696,190 @@ drivers <- data |>
          transparency = ifelse(grepl("transparency", phys_drive), 1, 0),
          turb = ifelse(grepl("turbidity", phys_drive), 1, 0),
          light = ifelse(grepl("PAR", phys_drive), 1, 0),    #need to pull out rainfall & precipitation, stability/, water residence time, flushing
-         tss = ifelse(grepl("total suspended solids", phys_drive), 1, 0), 
+         tss_tds = ifelse(grepl("total suspended solids|tss|tds|total dissolved solid", phys_drive), 1, 0), 
+         strat = ifelse(grepl("mix|stab|strat", phys_drive), 1, 0),
+         restime = ifelse(grepl("residence", phys_drive), 1, 0), 
+         flush_discharge = ifelse(grepl("flush|discharge", phys_drive), 1, 0), 
+         inflow = ifelse(grepl("inflow", phys_drive), 1, 0),
+         precip = ifelse(grepl("precip|rain", phys_drive), 1, 0),
+         air_temp = ifelse(grepl("air", phys_drive), 1, 0),
          other_phys = ifelse(grepl("Other", phys_drive), 1, 0))
 
+other_phys <- drivers |> 
+  filter(other_phys == 1) |> 
+  select(name_yr, title, num_water, phys_drive)
+
+  unique(data$phys_response)
+WLchangevars <- data |> 
+mutate(not_assessed = ifelse(grepl("not assessed", phys_response), 1, 0), 
+         water_temp = ifelse(grepl("water temperature", phys_response), 1, 0),
+         transparency = ifelse(grepl("transparency", phys_response), 1, 0),
+         turb = ifelse(grepl("turbidity", phys_response), 1, 0),
+         light = ifelse(grepl("PAR", phys_response), 1, 0),    #need to pull out rainfall & precipitation, stability/, water residence time, flushing
+         tss_tds = ifelse(grepl("total suspended solids|tss|tds|total dissolved solid|sediment resuspension", phys_response), 1, 0), 
+         strat = ifelse(grepl("mix|stab|strat", phys_response), 1, 0),
+         restime = ifelse(grepl("residence", phys_response), 1, 0), 
+         flush_discharge = ifelse(grepl("flush|discharge", phys_response), 1, 0), 
+         inflow = ifelse(grepl("inflow", phys_response), 1, 0),
+         precip = ifelse(grepl("precip|rain", phys_response), 1, 0),
+         air_temp = ifelse(grepl("air", phys_response), 1, 0),
+         other_phys = ifelse(grepl("Other", phys_response), 1, 0), 
+       watercolor = ifelse(grepl("water color", phys_response), 1, 0)) |> 
+mutate(tp = ifelse(grepl("TP", chem_response), 1, 0),                            #chemical variables
+         tn = ifelse(grepl("TN", chem_response), 1, 0), 
+         nh4 = ifelse(grepl("NH4", chem_response), 1, 0), 
+         ph = ifelse(grepl("pH", chem_response), 1, 0),
+         do = ifelse(grepl("DO", chem_response), 1, 0),
+         srp = ifelse(grepl("SRP", chem_response), 1, 0),
+         no3 = ifelse(grepl("NO3", chem_response), 1, 0),
+         cond = ifelse(grepl("conductivity", chem_response), 1, 0),
+         metals = ifelse(grepl("metals", chem_response), 1, 0),
+         orp = ifelse(grepl("ORP", chem_response), 1, 0),
+         no2 = ifelse(grepl("NO2", chem_response), 1, 0),
+         doc = ifelse(grepl("DOC", chem_response), 1, 0),
+         din = ifelse(grepl("DIN", chem_response), 1, 0),
+         ph = ifelse(grepl("pH", chem_response), 1, 0),
+         salinity = ifelse(grepl("salinity", chem_response), 1, 0), 
+         other_chem = ifelse(grepl("Other", chem_response), 1, 0)) 
 
 
 #unique(data$bio_vars)
-rm(freq, chemvars, biovars)
+#rm(freq, chemvars, biovars)
 unique(data$chem_drive)
 unique(data$phys_drive)
 # vars <- drivers |> select(c(filt_chla, phyto_micros, single_cyano_taxon, sensor_chla, other_bio, other_chem, tp, tn, nh4, ph, do, srp, no3, cond, metals, orp, no2, doc, din, ph, salinity))
 
-chemvars <- drivers |> select(c(other_chem, tp, tn, nh4, ph, do, srp, no3, cond, metals, orp, no2, doc, din, ph, salinity))
-physvars <- drivers |> select(c(water_level, water_temp, transparency, turb, light, tss, other_phys))
+chemvars_drive <- drivers |> select(c(other_chem, tp, tn, nh4, ph, do, srp, no3, cond, metals, orp, no2, doc, din, ph, salinity))
+chemvarsWL <- WLchangevars |> select(c(other_chem, tp, tn, nh4, ph, do, srp, no3, cond, metals, orp, no2, doc, din, ph, salinity))
+physvars_drive <- drivers |> select(c(water_level, water_temp, transparency, turb, light, tss_tds, other_phys, strat, restime, flush_discharge, inflow, precip, air_temp))
+physvarsWL <- WLchangevars |> select(c(water_temp, transparency, turb, light, tss_tds, other_phys, strat, restime, flush_discharge, inflow, precip, air_temp))
 # summary(vars) 
 
-freq <- as.data.frame(colSums(chemvars))
+freqchem <- as.data.frame(colSums(chemvars_drive))
 
-chemvars <- setNames(cbind(rownames(freq), freq, row.names = NULL), 
+chemvars_drive <- setNames(cbind(rownames(freqchem), freqchem, row.names = NULL), 
          c("names", "sum"))
 
-chemvars |> ggplot(aes(x = names, y = sum)) + geom_bar(stat = "identity") + 
+freqchemWL <- as.data.frame(colSums(chemvarsWL))
+
+chemvarsWL <- setNames(cbind(rownames(freqchemWL), freqchemWL, row.names = NULL), 
+         c("names", "sum"))
+
+chemvars_drive |> ggplot(aes(x = names, y = sum)) + geom_bar(stat = "identity") + 
   theme(axis.text.x = element_text(angle = 45, vjust = 0.5, hjust=1)) + 
   ggtitle("Chem variable Drivers")
+
+chemvarsWL |> ggplot(aes(x = names, y = sum)) + geom_bar(stat = "identity") + 
+  theme(axis.text.x = element_text(angle = 45, vjust = 0.5, hjust=1)) + 
+  ggtitle("Chem variables that changed in response to WL")
 # want a comparison with what was measured!
 
-freqphys <- as.data.frame(colSums(physvars))
-rm(physvars)
-physvars2 <- setNames(cbind(rownames(freqphys), freqphys, row.names = NULL), 
+freqphys <- as.data.frame(colSums(physvars_drive))
+freqphysWL <- as.data.frame(colSums(physvarsWL))
+rm(physvars_drive)
+physvars2_drive <- setNames(cbind(rownames(freqphys), freqphys, row.names = NULL), 
          c("names", "sum"))
 
-physvars2 |> ggplot(aes(x = names, y = sum)) + geom_bar(stat = "identity") + 
+physvars2WL <- setNames(cbind(rownames(freqphysWL), freqphysWL, row.names = NULL), 
+         c("names", "sum"))
+
+physvars2_drive |> ggplot(aes(x = names, y = sum)) + geom_bar(stat = "identity") + 
   theme(axis.text.x = element_text(angle = 45, vjust = 0.5, hjust=1)) + 
   ggtitle("Phys variable Drivers")
+
+physvars2WL |> ggplot(aes(x = names, y = sum)) + geom_bar(stat = "identity") + 
+  theme(axis.text.x = element_text(angle = 45, vjust = 0.5, hjust=1)) + 
+  ggtitle("Phys variable that change with water level")
+
+
+#Comparison of what was measured with how many found significant
+
+
+```
+
+```{r}
+chemvars1 <- chemvars |> 
+  rename(measured = sum, 
+         name = names)
+chemicalvars <- cbind(chemvars1, chemvars_drive)
+chemicalvars |> 
+  select(c(names, measured, sum)) |> 
+  rename(id = sum) |> 
+  mutate(notid = measured - id) |> 
+  select(c(names, id, notid)) |> 
+  pivot_longer(!names, names_to = "driver", values_to = "count") |> 
+  ggplot(aes(fill = driver, y = count, x = names))+
+  geom_bar(position = "fill", stat = "identity")
+
+chemicalvars |> 
+  select(c(names, measured, sum)) |> 
+  rename(id = sum) |> 
+  mutate(notid = measured - id) |> 
+  select(c(names, id, notid)) |> 
+  pivot_longer(!names, names_to = "driver", values_to = "count") |> 
+  ggplot(aes(fill = driver, y = count, x = names))+
+  geom_bar(position = "stack", stat = "identity")
+
+physvars1 <- physvars |> 
+  rename(measured = sum, 
+         name = names)
+physvars <- cbind(physvars1, physvars2_drive)
+physvars |> 
+  select(c(names, measured, sum)) |> 
+  rename(id = sum) |> 
+  mutate(notid = measured - id) |> 
+  select(c(names, id, notid)) |> 
+  mutate(notid = ifelse(notid <0, 0, notid)) |> 
+  pivot_longer(!names, names_to = "driver", values_to = "count") |> 
+  ggplot(aes(fill = driver, y = count, x = names)) +
+  geom_bar(position = "stack", stat = "identity") +
+  theme(axis.text.x = element_text(angle = 45, vjust = 0.5, hjust=1)) + 
+  ggtitle("Phys variables")
+
+physvars |> 
+  select(c(names, measured, sum)) |> 
+  rename(id = sum) |> 
+  mutate(notid = measured - id) |> 
+  select(c(names, id, notid)) |> 
+  mutate(notid = ifelse(notid <0, 0, notid)) |> 
+  pivot_longer(!names, names_to = "driver", values_to = "count") |> 
+  ggplot(aes(fill = driver, y = count, x = names)) +
+  geom_bar(position = "fill", stat = "identity") +
+  theme(axis.text.x = element_text(angle = 45, vjust = 0.5, hjust=1)) + 
+  ggtitle("Phys variables")
+
+chemvars1 <- chemvars |> 
+  rename(measured = sum, 
+         name = names)
+chemicalvarsWL <- cbind(chemvars1, chemvarsWL)
+chemicalvarsWL |> 
+  select(c(names, measured, sum)) |> 
+  rename(change = sum) |> 
+  mutate(nochange = measured - change) |> 
+  select(c(names, change, nochange)) |> 
+  pivot_longer(!names, names_to = "driver", values_to = "count") |> 
+  ggplot(aes(fill = driver, y = count, x = names))+
+  geom_bar(position = "fill", stat = "identity") + 
+  ggtitle("Proportion Chemical variables that changed with WL change" )
+
+chemicalvarsWL |> 
+  select(c(names, measured, sum)) |> 
+  rename(change = sum) |> 
+  mutate(nochange = measured - change) |> 
+  select(c(names, change, nochange)) |> 
+  pivot_longer(!names, names_to = "driver", values_to = "count") |> 
+  ggplot(aes(fill = driver, y = count, x = names))+
+  geom_bar(position = "stack", stat = "identity")
+```
+```{r count number of papers}
+papers <- data |> 
+  select(cov_num, name_yr) |> 
+  unique()
+bodies <- boxplotdata2 |> 
+  select(name_yr, res_name) |> 
+  unique()
+countries <- data |> 
+  select(country) |> 
+  unique()
 ```
 
