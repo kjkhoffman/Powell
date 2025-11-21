@@ -31,16 +31,20 @@ head(init_data)
 
 ```{r exclude papers}
 data_excl <- init_data |> 
-  filter(!name_yr %in% c("Beaver 2013","Jia 2022","Cao 2016","Wang 2022","Kisand 2004", "Hart 2004")) |> 
-  filter(!title %in% c("Steady-state assemblages in a Mediterranean hypertrophic reservoir. The role of Microcystis ecomorphological variability in maintaining an apparent equilibrium")) #Naselli-Flores 2003
+  filter(!name_yr %in% c("Beaver 2013","Jia 2022","Cao 2016","Wang 2022","Kisand 2004", "Hart 2004", "Nõges 2010", "Tuvikene 2011")) |>
+  filter(!res_name == "Serra Serrada Reservoir") |> 
+  filter(!title %in% c("Steady-state assemblages in a Mediterranean hypertrophic reservoir. The role of Microcystis ecomorphological variability in maintaining an apparent equilibrium")) |> #Naselli-Flores 2003
 #Data is either duplicated or more data is available in Hart 2006, so excluding Hart 2004
+  filter(!notes %in% c("Ignore this version, everything has been added to multiple reservoirs sheet! KKH"))
 #Beaver no WL data
 #Jia 
+#duplicate Sharip
 
-keep <- init_data |> 
-  filter(name_yr %in% c("Beaver 2013","Jia 2022","Cao 2016","Wang 2022","Kisand 2004", "Hart 2004")) |> 
-  filter(!title %in% c("Steady-state assemblages in a Mediterranean hypertrophic reservoir. The role of Microcystis ecomorphological variability in maintaining an apparent equilibrium")) |> 
-  select(c(name_yr, notes))
+excluded_papers <- init_data |> 
+  filter(name_yr %in% c("Beaver 2013","Jia 2022","Cao 2016","Wang 2022","Kisand 2004", "Hart 2004", "Nõges 2010", "Tuvikene 2011")|res_name == "Serra Serrada Reservoir"| title == "Steady-state assemblages in a Mediterranean hypertrophic reservoir. The role of Microcystis ecomorphological variability in maintaining an apparent equilibrium"|notes %in% c("Ignore this version, everything has been added to multiple reservoirs sheet! KKH")) 
+
+duplicate_waterbodies <- data_excl |> 
+  select(name_yr, res_name, country, study_years, consecutive, phys_response, notes)
 
 ```
 
@@ -49,11 +53,21 @@ keep <- init_data |>
 data_chla_mod <- data_excl |> 
   mutate(tp = mean_tp) |> 
    separate_wider_delim(mean_tp, " ", names = c("tp_ugL", "unit_tp"), too_few = "align_start") |> 
-  mutate(mean_chla = ifelse(mean_chla == "0.07 to 34.62 ug/L", "8", mean_chla)) |> #change Rai 1978 to 8ug/L, actual range between 0 and 14 ug/L, origianl range from pheophyton
+  mutate(mean_chla = ifelse(mean_chla == "0.07 to 34.62 ug/L", "8", mean_chla)) |> #change Rai 1978 to 8ug/L, actual range between 0 and 14 ug/L, original range from pheophyton
   mutate(mean_chla = ifelse(mean_chla == "15.7ug/L", "15.7 ug/L", mean_chla)) |> 
   mutate(chla = mean_chla) |> 
-   separate_wider_delim(mean_chla, " ", names = c("chla_ugL", "unit_chla"), too_few = "align_start") #|> 
+   separate_wider_delim(mean_chla, " ", names = c("chla_ugL", "unit_chla"), too_few = "align_start") |> #|> 
  # select(c(chla, chla_ugL, unit_chla, tp, tp_ugL, unit_tp))
+  mutate(res_name = ifelse(res_name == "Rybinsk", "Rybinsk Reservoir", 
+                           ifelse(res_name == "Cruzeta man-made lake", "Cruzeta", 
+ifelse(res_name == "Castanhao", "Castanhão reservoir", res_name)))) |> 
+  filter((!is.na(cov_num)|!is.na(num_water)|!is.na(lat_dd))) |> 
+  mutate(fullpond_sa = ifelse(fullpond_sa == "~600", 600, fullpond_sa), 
+         fullpond_sa = as.numeric(fullpond_sa)) |> 
+  mutate(obs_maxdepth = ifelse(obs_maxdepth == "SEK had 12, 12 max at sampling station", 12, obs_maxdepth)) |> 
+mutate(mindepth = ifelse(mindepth == "SEK had 9, 9 was min at sampling station", 9, mindepth)) |> 
+  mutate(elev_decrease_max = ifelse(grepl("2001", elev_decrease_max), "-6", elev_decrease_max)) |> # to use the 2003 value
+  mutate(long_dd = ifelse(res_name == "Lake Buchanan", -98.4, long_dd))
   
  rm(data) 
   
@@ -82,12 +96,12 @@ data <- data_chla_mod |>
   mutate(trophic_status_chla = ifelse(trophic == "not reported" & chla_ugL <= 2.6, "oligotrophic", 
                                    ifelse(trophic == "not reported" & chla_ugL >2.6 & chla_ugL <=7.3, "mesotrophic", 
                                           ifelse(trophic == "not reported" & chla_ugL >7.3 & chla_ugL <= 56, "eutrophic", 
-                                                 ifelse(trophic == "not reported" & chla_ugL >56, "hypertrophic",
+                                                 ifelse(trophic == "not reported" & chla_ugL >56, "hypereutrophic",
                                                         ifelse(trophic == "not reported" & is.na(chla_ugL), trophic, trophic)))))) %>% 
   mutate(trophic_status_tp = ifelse(tp_ugL <= 12, "oligotrophic", 
                                      ifelse(tp_ugL >=12 & tp_ugL <=24, "mesotrophic", 
                                             ifelse(tp_ugL >24 & tp_ugL <= 70, "eutrophic", 
-                                                   ifelse(tp_ugL >70, "hypertrophic",
+                                                   ifelse(tp_ugL >70, "hypereutrophic",
                                                           ifelse(is.na(tp_ugL), trophic, NA)))))) %>%  
   mutate(trophic_status_combined = ifelse(trophic == "not reported" & !is.na(trophic_status_tp), trophic_status_tp,
                                           ifelse(trophic == "not reported" & !is.na(trophic_status_chla), trophic_status_chla, trophic)))
@@ -98,7 +112,8 @@ data <- data_chla_mod |>
 
 Data wrangling for histograms set. 
 ```{r data wrangling - histograms}
-phyto_responses <- c("Increase in phytoplankton", "No significant response", "Not measured", "Decrease in phytoplankton")
+# phyto_responses <- c("Increase in phytoplankton", "No significant response", "Not measured", "Decrease in phytoplankton") #take out the "not measured" category
+phyto_responses <- c("Increase in phytoplankton", "No significant response", "Decrease in phytoplankton")
 
 data |> 
   filter(decrease_phyto_response %in% phyto_responses) |> 
@@ -120,7 +135,9 @@ data |>
   theme_bw() +
   geom_text(aes(label = ..count..), stat = "count", vjust = 1.5, size = 5, colour = "white")
   
-cyano_responses <- c("Increase in cyanobacteria", "No significant response", "Not measured", "Decrease in cyanobacteria")
+# cyano_responses <- c("Increase in cyanobacteria", "No significant response", "Not measured", "Decrease in cyanobacteria")
+
+cyano_responses <- c("Increase in cyanobacteria", "No significant response", "Decrease in cyanobacteria") #take out the "not measured" category
 
 data |> 
   filter(increase_cyano_response %in% cyano_responses) |> 
@@ -156,6 +173,70 @@ increase_phyto
 increase_cyano
 
 ```{r quick info - histograms}
+data_country <- data |> subset(!is.na(country)) %>% 
+  mutate(country = ifelse(country == "", "multires", country)) |> 
+  mutate(continent = case_when(
+    country %in% c("Brazil", "Argentina", "Uruguay", "Argentina and Uruguay") ~ "South America",
+      country %in% c("United States", "USA/Canada", "Canada", "Mexico") ~ "North America",
+      country %in% c("Portugal", "England", "Italy", "France", "Serbia", 
+                     "Estonia", "Estonia/Russia") ~ "Europe",
+      country %in% c("Russia") ~ "Europe/Asia",
+      country %in% c("China", "Taiwan", "Malaysia", "Mongolia", "Lebanon",
+                     "Cambodia", "Vietnam") ~ "Asia",
+       country %in% c("Australia") ~ "Oceania",
+    country %in% c("South Africa") ~ "Africa",
+      TRUE ~ NA_character_
+    )
+  )
+library(sf)
+library(dplyr)
+library(rnaturalearth)
+library(rnaturalearthdata)
+
+countries_sf <- data |> 
+  select(lat_dd, long_dd, res_name, cov_num, name_yr) |> 
+  filter(!is.na(lat_dd) & !is.na(long_dd)) |> 
+  st_as_sf(coords = c("long_dd", "lat_dd"), crs = 4326) 
+
+world <- ne_countries(scale = "medium", returnclass = "sf")
+df_with_country <- st_join(countries_sf, world["name_long"])
+df_final <- df_with_country %>% 
+  st_drop_geometry() %>%
+  rename(country = name_long)
+df_final <- df_final %>% 
+  mutate(continent = world$continent[match(country, world$name_long)])
+df_final <- df_final %>% 
+  mutate(continent = world$continent[match(country, world$name_long)])
+
+countries <- left_join(data, df_final, by = c("res_name", "cov_num", "name_yr")) |> select(c("res_name", "name_yr", "country.x", "country.y", "continent")) |> 
+  mutate(country.x = ifelse(country.x == "", NA, country.x)) |> 
+  mutate(country = ifelse(!is.na(country.x), country.x, country.y)) |> 
+  mutate(continent.a = case_when(
+    country %in% c("Brazil", "Argentina", "Uruguay", "Argentina and Uruguay") ~ "South America",
+      country %in% c("United States", "USA/Canada", "Canada", "Mexico") ~ "North America",
+      country %in% c("Portugal", "England", "Italy", "France", "Serbia", 
+                     "Estonia", "Estonia/Russia") ~ "Europe",
+      country %in% c("Russia") ~ "Europe/Asia",
+      country %in% c("China", "Taiwan", "Malaysia", "Mongolia", "Lebanon",
+                     "Cambodia", "Vietnam") ~ "Asia",
+       country %in% c("Australia") ~ "Oceania",
+    country %in% c("South Africa") ~ "Africa",
+      TRUE ~ NA_character_
+    )
+  ) |> 
+  mutate(continent = ifelse(!is.na(continent.a), continent.a, continent)) |> 
+  select(res_name, country, continent) |> 
+  unique()
+countries |> 
+  filter(!is.na(continent)) |> 
+  ggplot(aes(x=continent))+
+  geom_bar() + 
+  xlab("Continent") +
+  ylab("Number of reservoirs") + 
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 45, vjust = 0.5, hjust=1))+
+  geom_text(aes(label = ..count..), stat = "count", vjust = 1.5, size = 5, colour = "black")
+
 data |> 
   subset(!is.na(country)) %>% 
   mutate(country = ifelse(country == "", "multires", country)) |> 
@@ -165,7 +246,7 @@ data |>
   xlab("Country") +
   ylab("Number of reservoirs") + 
   theme_bw() +
-  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))+
+  theme(axis.text.x = element_text(angle = 45, vjust = 0.5, hjust=1))+
   geom_text(aes(label = ..count..), stat = "count", vjust = 1.5, size = 5, colour = "black")
 
 #consider subsetting these to phyto and cyano specific studies?
@@ -178,18 +259,66 @@ data |>
   theme_bw() +
   theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
 
-trophicstat <- c("eutrophic", "meso-eutrophic", "hypereutrophic", "mesotrophic", "meso-oligotrophic", "oligo-mesotrophic", "oligotrophic", "not reported")
+trophicstat <- c("eu-hypereutrophic", "eutrophic", "meso-eutrophic", "hypereutrophic", "mesotrophic", "meso-oligotrophic", "oligo-mesotrophic", "oligotrophic", "not reported")
+
+# data |> 
+#   filter(trophic_status_combined %in% trophicstat) |> 
+#   ggplot(aes(x= factor(trophic, c("hypereutrophic", "eutrophic","meso-eutrophic", "mesotrophic", "meso-oligotrophic", "oligo-mesotrophic", "oligotrophic", "not reported")))) + 
+#   geom_bar(fill = "#DDCC77") +
+#   xlab("Trophic Status") +
+#   ylab("Number of reservoirs") + 
+#   theme_bw() +
+#   #theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))+
+#   geom_text(aes(label = ..count..), stat = "count", vjust = 1.5, size = 5, colour = "black")
+
+test <- data |> 
+  select(trophic_status_combined) |>
+  unique()
 
 data |> 
+   #take out "not reported"
   filter(trophic_status_combined %in% trophicstat) |> 
-  ggplot(aes(x= factor(trophic, c("hypereutrophic", "eutrophic","meso-eutrophic", "mesotrophic", "meso-oligotrophic", "oligo-mesotrophic", "oligotrophic", "not reported")))) + 
+  #filter(trophic_status_combined != "not reported") |> 
+  ggplot(aes(x= factor(trophic_status_combined, c("hypereutrophic", "eu-hypereutrophic", "eutrophic","meso-eutrophic", "mesotrophic", "meso-oligotrophic", "oligo-mesotrophic", "oligotrophic", "not reported")))) + 
   geom_bar(fill = "#DDCC77") +
   xlab("Trophic Status") +
   ylab("Number of reservoirs") + 
   theme_bw() +
+  theme(axis.text.x = element_text(angle = 45, vjust = 0.5, hjust=1))+
   #theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))+
   geom_text(aes(label = ..count..), stat = "count", vjust = 1.5, size = 5, colour = "black")
 
+data |> 
+   #take out "not reported"
+  filter(trophic_status_combined %in% trophicstat) |> 
+  filter(trophic_status_combined != "not reported") |> 
+  ggplot(aes(x= factor(trophic_status_combined, c("hypereutrophic", "eu-hypereutrophic", "eutrophic","meso-eutrophic", "mesotrophic", "oligo-mesotrophic", "oligotrophic")))) + 
+  geom_bar(fill = "#DDCC77") +
+  xlab("Trophic Status") +
+  ylab("Number of reservoirs") + 
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 45, vjust = 0.5, hjust=1))+
+  #theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))+
+  geom_text(aes(label = ..count..), stat = "count", vjust = 1.5, size = 5, colour = "black")
+
+non_dups <- data |> select(res_name, trophic_status_combined) |> 
+  unique()
+
+ts <- data |> 
+  select(c(cov_num, name_yr, res_name, trophic_status_combined))
+
+non_dups |> 
+   #take out "not reported"
+  filter(trophic_status_combined %in% trophicstat) |> 
+  filter(trophic_status_combined != "not reported") |> 
+  ggplot(aes(x= factor(trophic_status_combined, c("hypereutrophic", "eu-hypereutrophic", "eutrophic","meso-eutrophic", "mesotrophic", "oligo-mesotrophic", "oligotrophic")))) + 
+  geom_bar(fill = "#DDCC77") +
+  xlab("Trophic Status") +
+  ylab("Number of reservoirs") + 
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 45, vjust = 0.5, hjust=1))+
+  #theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))+
+  geom_text(aes(label = ..count..), stat = "count", vjust = 1.5, size = 5, colour = "black")
 ```
 
 ```{r map from latlongs}
@@ -896,6 +1025,25 @@ all <- new_all %>% ggplot(aes(x = prop_delta_wl, y = response_binary, color = as
         legend.title=element_blank())
 all
 
+phyto_all <- new_all %>% 
+  filter(type == "phyto") |> 
+  ggplot(aes(x = prop_delta_wl, y = response_binary, color = as.factor(type), shape = as.factor(type))) +
+  scale_color_manual(values = c("#117733"), name = "")+
+  scale_shape_manual(values = c(20)) +
+  geom_point(size = 3) +
+  geom_smooth(method = "glm",
+              method.args = list(family = "binomial"),
+              se = FALSE, linewidth = 3) +
+  #geom_jitter()+
+ ylab("Response to changes in water level") +
+  xlab("Proportion water level change") +
+  ggtitle("Combined increases and decreases") + 
+  theme_bw() +
+  theme(axis.text.x = element_text(hjust = 1, size = 10),
+        axis.title.y=element_text(angle=90, vjust = .5, size = 12),
+        legend.title=element_blank())
+phyto_all
+
 logregdata_phyto <- new_all %>% subset(type == "phyto")
 logregdata_cyano <- new_all %>% subset(type == "cyano")
 
@@ -1572,8 +1720,15 @@ ggplot(data = dat, aes(x = trophic_status_combined))+
 
 ```{r}
 #stacked barplots for chisq
+dat_phyto_new <- dat_phyto_new |> 
+  mutate(increase_decrease_mosaic = case_when(increase_decrease_mosaic == "Decrease" ~ "Decrease in Water Level", 
+                                              increase_decrease_mosaic == "Increase" ~ "Increase in Water Level"))
 
-  ggplot(dat_phyto_new, aes(x = increase_decrease_mosaic, y = count, fill = increase_phyto)) + 
+dat_cyano_new <- dat_cyano_new |> 
+  mutate(increase_decrease_mosaic = case_when(increase_decrease_mosaic == "Decrease" ~ "Decrease in Water Level", 
+                                              increase_decrease_mosaic == "Increase" ~ "Increase in Water Level"))
+ 
+ ggplot(dat_phyto_new, aes(x = increase_decrease_mosaic, y = count, fill = increase_phyto)) + 
     geom_bar(position="stack", stat="identity")
 
   ggplot(dat_phyto_new, aes(x = increase_decrease_mosaic, y = count, fill = increase_phyto)) + 
@@ -1582,7 +1737,7 @@ ggplot(data = dat, aes(x = trophic_status_combined))+
     ggplot(dat_cyano_new, aes(x = increase_decrease_mosaic, y = count, fill = increase_cyano)) + 
     geom_bar(position="stack", stat="identity")
 
-  ggplot(dat_phyto_new, aes(x = increase_decrease_mosaic, y = count, fill = increase_phyto)) + 
+  ggplot(dat_cyano_new, aes(x = increase_decrease_mosaic, y = count, fill = increase_cyano)) + 
     geom_bar(position="fill", stat="identity")
 ```
 
@@ -1809,7 +1964,12 @@ chemicalvars |>
   select(c(names, id, notid)) |> 
   pivot_longer(!names, names_to = "driver", values_to = "count") |> 
   ggplot(aes(fill = driver, y = count, x = names))+
-  geom_bar(position = "fill", stat = "identity")
+  geom_bar(position = "fill", stat = "identity") + 
+  ggtitle("Proportion Chemical variables that were identified as drivers" ) + 
+  geom_text(aes(label = count),
+            position = position_fill(vjust = 0.5), 
+            color = "black", 
+            size = 3)
 
 chemicalvars |> 
   select(c(names, measured, sum)) |> 
@@ -1823,7 +1983,9 @@ chemicalvars |>
 physvars1 <- physvars |> 
   rename(measured = sum, 
          name = names)
+
 physvars <- cbind(physvars1, physvars2_drive)
+
 physvars |> 
   select(c(names, measured, sum)) |> 
   rename(id = sum) |> 
@@ -1846,7 +2008,11 @@ physvars |>
   ggplot(aes(fill = driver, y = count, x = names)) +
   geom_bar(position = "fill", stat = "identity") +
   theme(axis.text.x = element_text(angle = 45, vjust = 0.5, hjust=1)) + 
-  ggtitle("Phys variables")
+  ggtitle("Phys variables") + 
+  geom_text(aes(label = count),
+            position = position_fill(vjust = 0.5), 
+            color = "black", 
+            size = 3)
 
 chemvars1 <- chemvars |> 
   rename(measured = sum, 
@@ -1860,17 +2026,50 @@ chemicalvarsWL |>
   pivot_longer(!names, names_to = "driver", values_to = "count") |> 
   ggplot(aes(fill = driver, y = count, x = names))+
   geom_bar(position = "fill", stat = "identity") + 
-  ggtitle("Proportion Chemical variables that changed with WL change" )
+  ggtitle("Proportion Chemical variables that changed with WL change" ) + 
+  geom_text(aes(label = count),
+            position = position_fill(vjust = 0.5), 
+            color = "black", 
+            size = 3)
 
-chemicalvarsWL |> 
+
+physvars1 <- physvars1 |> 
+  rename(measured = sum, 
+         name = names)
+
+physvars_wl_spec <- physvars1 |> 
+  filter(name != "water_level")
+physicalvarsWL <- cbind(physvars_wl_spec, physvars2WL)
+
+physicalvarsWL |> 
   select(c(names, measured, sum)) |> 
   rename(change = sum) |> 
   mutate(nochange = measured - change) |> 
   select(c(names, change, nochange)) |> 
   pivot_longer(!names, names_to = "driver", values_to = "count") |> 
   ggplot(aes(fill = driver, y = count, x = names))+
-  geom_bar(position = "stack", stat = "identity")
+  geom_bar(position = "fill", stat = "identity") + 
+  ggtitle("Proportion physical variables that changed with WL change" ) + 
+    theme(axis.text.x = element_text(angle = 45, vjust = 0.5, hjust=1)) + 
+  geom_text(aes(label = count),
+            position = position_fill(vjust = 0.5), 
+            color = "black", 
+            size = 3)
+# chemicalvarsWL |> 
+#   select(c(names, measured, sum)) |> 
+#   rename(change = sum) |> 
+#   mutate(nochange = measured - change) |> 
+#   select(c(names, change, nochange)) |> 
+#   pivot_longer(!names, names_to = "driver", values_to = "count") |> 
+#   ggplot(aes(fill = driver, y = count, x = names))+
+#   geom_bar(position = "stack", stat = "identity") + geom_text(aes(label = count),
+#             position = position_stack(vjust = 0.5), 
+#             color = "white", 
+#             size = 3)
 ```
+
+
+
 ```{r count number of papers}
 papers <- data |> 
   select(cov_num, name_yr) |> 
