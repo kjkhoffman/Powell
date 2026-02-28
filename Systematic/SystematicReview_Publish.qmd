@@ -1,5 +1,8 @@
 ---
-title: "SystematicReview_Final"
+title: "SystematicReview_Final" # MEL consider linking title to manuscript?
+                                # e.g., "Analysis code associated with Hoffman et al..."
+                                # just to make it super obvious for reviewers
+author: [fill in]
 format: html
 editor: visual
 ---
@@ -8,11 +11,12 @@ This script reads in the extracted data from the systematic literature review.
 
 ## Libraries
 
-libraries for the whole script!
+Install and load dependencies.
 
 ```{r packages}
 #| message: false
 #| warning: false
+# MEL remember to add install.packages statements for each of these!
 library(janitor)
 library(ggplot2)
 library(tidyverse)
@@ -34,7 +38,7 @@ library(plotly)
 library(patchwork)
 ```
 
-#Read in data I preprocessed colnames for the data.
+#Read in data.
 
 ```{r read in data}
 data <- "Systematic/Combined_08Oct.csv"
@@ -49,25 +53,25 @@ head(init_data)
 
 Papers were excluded for the following reasons:
 
-"Abirhire 2019": Has 2 years of data, Abirhire 2023 has 8 years of data BUT it's not presented in a way that is particularly usable \> doesn't fit as well. Excluded 2019 because that was our criteria
+Abirhire 2019: Has 2 years of data, Abirhire 2023 has 8 years of data BUT it's not presented in a way that is particularly usable \> doesn't fit as well. Excluded 2019 because that was our criteria \#### MEL: sorry, not following this - are you saying the 2023 paper data isn't presented in a way that's particularly usable? and which criterion was 2019 excluded on?
 
-Beaver 2013: we contacted the author and there was no WL data available
+Beaver 2013: contacted the author and there were no water level data available
 
-Braga 2015: duplicate data with Medeiros paper, and Medeiros paper has an extra year of data
+Braga 2015: duplicate data with Medeiros paper, and Medeiros paper has an extra year of data, so retaining Medeiros and dropping Braga
 
-Braga 2020: duplicated data with deMendonca paper, deMendonca paper has a few more months of data
+Braga 2020: duplicated data with deMendonca paper, deMendonca paper has a few more months of data, so retaining deMendonca paper and dropping Braga
 
-Cao 2016 & Jia 2022: Poyang
+Cao 2016 & Jia 2022: Poyang \#### MEL can you explain why Poyang was excluded?
 
 Christensen 2015: Compared two rule curves, but didn't compare a high and low condition - the later rule curve generally meant higher water level, but not for all of the reservoirs. There's not a way to answer our questions with the data provided.
 
-Geraldes 2007 - Serra Serrada Reservoir: duplicate data with Geraldes 2005. Azivo Reservoir is still included from Geraldes 2007
+Geraldes 2007 - this paper presented two reservoirs. For the Serra Serrada Reservoir, the data was duplicate Geraldes 2005. Azivo Reservoir is still included from Geraldes 2007. \#### MEL Katie check my edits are true here?
 
 Hart 2004: Data is either duplicated or more data is available in Hart 2006, so excluding Hart 2004
 
-Kisand 2004 & Wang 2022: these papers were not clear enough to extract meaningful data from.
+Kisand 2004 & Wang 2022: these papers were not clear enough to extract data from.
 
-Lacerda 2018: same data are available in Santos, and Lacerda has a stronger focus on remote sensing
+Lacerda 2018: same data are available in Santos, and Lacerda has a stronger focus on remote sensing, which was not our target data type
 
 Naselli Flores 2003: duplicate data with other Naselli Flores 2003 paper, retained the one with more data
 
@@ -75,7 +79,7 @@ Nõges 2010 & Tuvikene 2011 & Noges 1999: duplicate data with other Nõges paper
 
 Sakharova 2018: 3 years of data, Mineeva has longer time series
 
-Sharip: paper got duplicated, removed the duplicate version. Also, Bera lake not more than 4.5m deep
+Sharip: paper got duplicated, removed the duplicate version. Also, Bera lake not more than 4.5m deep, so does not meet our depth criterion.
 
 ```{r exclude papers}
 #| warning: false
@@ -98,15 +102,15 @@ duplicate_waterbodies <- data_excl |>
 
 ```
 
-## Typos, trophic levels
+## Fixing typos and assigning trophic levels
 
-Fix typos, add trophic levels based on chla and P concentrations if available
+Fix typos and assign trophic levels based on chla and P concentrations if available.
 
 ```{r fix some data}
 data <- data_excl |> 
   mutate(tp = mean_tp) |> 
   separate_wider_delim(mean_tp, " ", names = c("tp_ugL", "unit_tp"), too_few = "align_start") |> 
-  mutate(mean_chla = ifelse(mean_chla == "0.07 to 34.62 ug/L", "8", mean_chla)) |> #change Rai 1978 to 8ug/L, actual range between 0 and 14 ug/L, original range from pheophyton
+  mutate(mean_chla = ifelse(mean_chla == "0.07 to 34.62 ug/L", "8", mean_chla)) |> #change Rai 1978 to 8ug/L, actual range between 0 and 14 ug/L, original range from pheophytin
   mutate(mean_chla = ifelse(mean_chla == "15.7ug/L", "15.7 ug/L", mean_chla)) |> #fix missing space in chla value
   mutate(chla = mean_chla) |> 
   separate_wider_delim(mean_chla, " ", names = c("chla_ugL", "unit_chla"), too_few = "align_start") |>
@@ -119,7 +123,7 @@ data <- data_excl |>
          fullpond_sa = as.numeric(fullpond_sa)) |> 
   mutate(obs_maxdepth = ifelse(obs_maxdepth == "SEK had 12, 12 max at sampling station", 12, obs_maxdepth), #fix text in numeric columns
          mindepth = ifelse(mindepth == "SEK had 9, 9 was min at sampling station", 9, mindepth)) |> 
-  mutate(elev_decrease_max = ifelse(grepl("2001", elev_decrease_max), "-6", elev_decrease_max), # to use the 2003 value
+  mutate(elev_decrease_max = ifelse(grepl("2001", elev_decrease_max), "-6", elev_decrease_max), # to use the 2003 value MEL are you meaning to search for 2001 in the elev_decrease_max column? seems that you are trying to change from a value reported for a 2001 paper to a value reported for a 2003 paper; if that's what you are trying to do, this is a typo
          elev_increase_max = ifelse(elev_increase_max == 0, NA, elev_increase_max)) |> #to remove increases of 0
   mutate(long_dd = ifelse(res_name == "Lake Buchanan", -98.4, long_dd), #fix incorrect latlongs
          lat_dd = ifelse(lat_dd == 103.466667 & res_name == "Zipingpu Reservoir", 30.983333, lat_dd), 
@@ -159,7 +163,7 @@ data <- data_excl |>
 write_csv(data, here("Systematic/qaqced.csv"))
 ```
 
-#Quick info
+# Dataset summary statistics
 
 ```{r quick study info}
 #number of waterbodies
@@ -193,45 +197,16 @@ trophic <- non_dups |>
   geom_text(aes(label = ..count..), stat = "count", vjust = 1.5, size = 5, colour = "black")
 
 trophic
-ggsave("~/GitHubRepos/CareyLabVT/Powell/Systematic/Plots/trophic.jpg", plot = trophic, height = 3, width = 6.5, units = "in")
+# MEL I've revised all of these ggsaves to be relative filepaths; this was creating a whole new directory on my computer that was not where the RProject was
+ggsave(paste0(here(),"/Systematic/Plots/trophic.jpg"), plot = trophic, height = 3, width = 6.5, units = "in")
 
 ```
 
-
-Phytoplankton drivers
-
-List of physical variables that we extracted that were measured and considered as drivers:
-water temperature
-water level
-secchi/transparency
-light(PAR, photic zone)
-turbidity
-total suspended solids
-total dissolved solids
-other
-
-chemical variables
-pH
-DO
-DOC
-DIC
-DOM
-POM
-TP
-SRP
-ORP (orthophosphate)
-TN
-TKN
-NO3
-NO2
-NH4
-DIN
-metals 
-cond
-salinity
-other
-
 ## Phytoplankton drivers
+
+Physical variables that we considered as potential drivers of phytoplankton community change: water temperature, water level, Secchi disk depth/transparency, light(PAR, photic zone), turbidity, total suspended solids, total dissolved solids, other
+
+Physical variables that we considered as potential drivers of phytoplankton community change: pH, DO, DOC, DIC, DOM, POM, TP, SRP, ORP (orthophosphate), TN, TKN, NO3, NO2, NH4, DIN, metals, conductivity, salinity, other
 
 ```{r}
 drivers <- data |> 
@@ -318,13 +293,12 @@ mutate(tp = ifelse(grepl("TP", chem_response), 1, 0),                           
          salinity = ifelse(grepl("salinity", chem_response), 1, 0), 
          other_chem = ifelse(grepl("Other", chem_response), 1, 0)) 
 
-#spread vars is whether or not the var was measured
+#spreadvars is whether or not the var was measured
 spreadvars <- data |> 
   mutate(filt_chla = ifelse(grepl("filtered chlorophyll", bio_vars), 1, 0),                       #biotic variables
          phyto_micros = ifelse(grepl("phytoplankton microscopy", bio_vars), 1, 0), 
          single_cyano_taxon = ifelse(grepl("single cyanobacterial taxon", bio_vars), 1, 0), 
          sensor_chla = ifelse(grepl("sensor", bio_vars), 1, 0),
-        # sensor_chla = ifelse(grepl("sensor", bio_vars), 1, 0),
          other_bio = ifelse(grepl("Other", bio_vars), 1, 0)) |> 
   mutate(tp = ifelse(grepl("TP", chem_vars), 1, 0),                            #chemical variables
          tn = ifelse(grepl("TN", chem_vars), 1, 0), 
@@ -393,6 +367,8 @@ physvars2_drive <- setNames(cbind(rownames(freqphys), freqphys, row.names = NULL
 physvars2WL <- setNames(cbind(rownames(freqphysWL), freqphysWL, row.names = NULL), 
          c("names", "sum"))
 ```
+
+\[MEL Add short description of chunk here\]
 
 ```{r}
 #separate out phytoplankton and cyanobacteria drivers
@@ -505,9 +481,12 @@ phys <- physvars_phytos |>
 
 phytos <- phys/chem
 phytos
-ggsave("~/GitHubRepos/CareyLabVT/Powell/Systematic/Plots/phytovars.jpg", plot = phytos, height = 5, width = 6.5, units = "in")
+# MEL what are id and notid again?
+ggsave(paste0(here(),"/Systematic/Plots/phytovars.jpg"), plot = phytos, height = 5, width = 6.5, units = "in")
 
 ```
+
+\[MEL add short description of chunk here\]
 
 ```{r cyanos vars only}
 # chemvars_drive_cyanos <- cyano_only_drivers |> select(c(other_chem, tp, tn, nh4, ph, do, srp, no3, cond, metals, orp, no2, doc, din, ph, salinity, dom, pom, dic, tkn))
@@ -592,12 +571,10 @@ physvars_cyanos_drivers <- physvars_cyanos |>
 
 cyanos <- physvars_cyanos_drivers/chemvars_cyanos_drivers
 cyanos
-ggsave("~/GitHubRepos/CareyLabVT/Powell/Systematic/Plots/cyanodrivervars.jpg", plot = cyanos, height = 5, width = 6.5, units = "in")
+# MEL same question, can you remind me what id and notid are?
+ggsave(paste0(here(),"Systematic/Plots/cyanodrivervars.jpg"), plot = cyanos, height = 5, width = 6.5, units = "in")
 
 ```
-
-
-
 
 ## Map
 
@@ -713,12 +690,12 @@ sitemap_years <- ggplot(world) +
         legend.title = element_text(size = 20))
 sitemap_years
 
-ggsave("~/GitHubRepos/CareyLabVT/Powell/Systematic/Plots/sitemap.jpg", plot = sitemap, height = 4, width = 6.5, units = "in")
+ggsave(paste0(here(),"/Systematic/Plots/sitemap.jpg"), plot = sitemap, height = 4, width = 6.5, units = "in")
 
-ggsave("~/GitHubRepos/CareyLabVT/Powell/Systematic/Plots/sitemapposter.jpg", plot = sitemap_trophic, height = 4, width = 10, units = "in")
+ggsave(paste0(here(),"/Systematic/Plots/sitemapposter.jpg"), plot = sitemap_trophic, height = 4, width = 10, units = "in")
 ```
 
-## Prop Water Level
+## Calculate proportion water level change
 
 ```{r max depth and proportion water level}
 prop_dl <- data |>
@@ -802,7 +779,9 @@ boxplotdata2 <- prop_dl %>%
 
 ```
 
-## Set up logistic regression
+## Set up logistic regression for effect of water level change on phytoplankton and cyanobacteria communities
+
+\[MEL can you add a brief description of what it means to prioritize water level decreases, prioritize water level increases, and use both? Just something really short, maybe 2-3 sentences; in fact you could just paraphrase from manuscript\]
 
 ```{r}
 cyanodecreasedata <- boxplotdata2 %>% 
@@ -927,7 +906,10 @@ logregdata <- logregdata_decrease
 
 ```
 
-## Logreg: combined
+## Plot logistic regression with combined water level increase/decrease
+
+This chunk will generate logistic regression plots for both phytoplankton and cyanobacteria.
+
 ```{r}
 logregdata_increase1 <- logregdata_increase |>
   rename(prop_delta_wl = prop_delta_wl_priorityincrease)
@@ -1006,14 +988,17 @@ summary(logregform_phyto)
 logregform_cyano <-  glm(formula=response_binary ~ prop_delta_wl, data=logregdata_cyano, family=binomial)
 summary(logregform_cyano)
 
-ggsave("~/GitHubRepos/CareyLabVT/Powell/Systematic/Plots/logregposter.jpg", plot = logreg_phyto, height = 9.5, width = 20, units = "in")
-ggsave("~/GitHubRepos/CareyLabVT/Powell/Systematic/Plots/logreg.jpg", plot = sitemap, height = 4, width = 8, units = "in")
+ggsave(paste0(here(),"/Systematic/Plots/logregposter.jpg"), plot = logreg_phyto, height = 9.5, width = 20, units = "in")
+ggsave(paste0(here(),"/Systematic/Plots/logreg.jpg"), plot = sitemap, height = 4, width = 8, units = "in")
 
 ```
 
-## Set up and run X2
+## Set up and run Chi-squared tests
+
+These Chi-square tests assess the effect of increases and decreases in water level on phytoplankton and cyanobacteria (do they experience an increase, a decrease, or no change?).
 
 ```{r}
+# MEL the data wrangling from lines 1002 - 1121 is intense! which I know is sort of on me since you were adapting code I wrote, I think :-) ...I got a little lost trying to follow some of the similar column names - can you provide a little annotation/comments to help guide a reviewer through this section?
 dat <- boxplotdata2 %>% 
   select(cov_num, res_name, trophic_status_combined, tp_ugL, decrease_phyto_response, increase_phyto_response,
          decrease_cyano_response, increase_cyano_response, chla_ugL, combined_phyto_response, combined_cyano_response) %>%
@@ -1261,9 +1246,10 @@ Xsq$p.value
 
 ```
 
-## X2 plots
+## Chi-squared test plots
 
 Possible Colors for chi-sq plots: "#8fc7c3", \# cyan-teal version of #99bbab "#d9f1ec" "#4dd0e1", "#b2ebf2" "#ddefcd" "#05A3CA", "#5dce97", "#608687", "#99bbab", "#ddefcd", "#80407c", "#45Cc80", "#a2eafc", "#99abbb""#9d99bb", "#cfcdef" "#99b3c8", \# blue version of #99bbab "#dde7f2") c("#8fb3d9", "#d6e4f5")
+#### MEL note to Katie to remove these colors once finalized
 
 ```{r barplots for chisq}
 #stacked barplots for chisq
@@ -1319,11 +1305,15 @@ chi <- phyto_chi / cyano_chi + plot_annotation(title = "Chi-Square")
 
 chi
 
-ggsave("~/GitHubRepos/CareyLabVT/Powell/Systematic/Plots/chi.jpg", plot = chi, height = 5, width = 6.5, units = "in")
+ggsave(paste0(here(),"/Systematic/Plots/chi.jpg"), plot = chi, height = 5, width = 6.5, units = "in")
 ```
 
-# Supplemental Figures
-logistic regression to prioritize increases or decreases. 
+# Supplemental figures
+
+Logistic regression figures that prioritize either increases or decreases in water level, rather than both as plotted above.
+
+## Logistic regression prioritizing increases in water level
+
 ```{r}
 cyanodecreasedata <- boxplotdata2 %>% 
   select(prop_alldelta_wl_decrease, prop_alldelta_wl_increase, prop_delta_wl_priorityincrease, combined_cyano_response_increasepriority, combined_cyano_response_binary_increasepriority, name_yr) %>% 
@@ -1411,7 +1401,7 @@ logregform_cyano <-  glm(formula=response_binary ~ prop_delta_wl_priorityincreas
 summary(logregform_cyano)
 ```
 
-## Logreg: decreases
+## Logistic regression prioritizing decreases in water level
 
 ```{r wl decreases}
 cyanodecreasedata <- boxplotdata2 %>% 
@@ -1501,9 +1491,7 @@ summary(logregform_phyto)
 logregform_cyano <-  glm(formula=response_binary ~ prop_delta_wl, data=logregdata_cyano, family=binomial)
 summary(logregform_cyano)
 ```
-
-
-
+## Barplot: number of reservoir by continent
 ```{r possible supplement figures}
 
 #countries by continent
@@ -1546,7 +1534,10 @@ countries |>
   theme_bw() +
   theme(axis.text.x = element_text(angle = 45, vjust = 0.5, hjust=1))+
   geom_text(aes(label = ..count..), stat = "count", vjust = 1.5, size = 5, colour = "black")
+```
 
+## Histogram of maximum reservoir depths
+```{r}
 #histogram of maxdepths
 
 data |> 
@@ -1559,7 +1550,7 @@ data |>
   theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
 
 ```
-
+#### MEL from here to the end of the document, it seems that this is all archived code - if so, I would recommend to move this into a separate file and name it something like archived analyses or exploratory analyses so that reviewers don't spend time here, since it's not actually being used for the paper. If you do end up using some of this code for the paper in the course of revisions, then you can move it back into this file.
 Old mapping figures
 
 ```{r old maps}
@@ -1682,10 +1673,11 @@ sitemap_trophic <- ggplot(world) +
 sitemap_trophic
 # ggsave("~/GitHubRepos/CareyLabVT/Powell/Systematic/Plots/sitemap.jpg", plot = sitemap, height = 4, width = 6.5, units = "in")
 
-ggsave("~/GitHubRepos/CareyLabVT/Powell/Systematic/Plots/sitemapposter.jpg", plot = sitemap_trophic, height = 4, width = 10, units = "in")
+ggsave(paste0(here(),"/Systematic/Plots/sitemapposter.jpg"), plot = sitemap_trophic, height = 4, width = 10, units = "in")
 ```
 
 Old code that includes all vars for drivers
+
 ```{r}
 #separate out phytoplankton and cyanobacteria drivers
 phyto_only_drivers <- drivers |> 
@@ -1812,10 +1804,11 @@ phys <- physvars_phytos |>
 
 phytos <- phys/chem
 phytos
-ggsave("~/GitHubRepos/CareyLabVT/Powell/Systematic/Plots/phytovars.jpg", plot = phytos, height = 5, width = 6.5, units = "in")
+ggsave(paste0(here(),"/Systematic/Plots/phytovars.jpg"), plot = phytos, height = 5, width = 6.5, units = "in")
 ```
 
 Code for variables that changed with water level change
+
 ```{r}
 chemvars1 <- chemvars |> 
   rename(measured = sum, 
@@ -1943,14 +1936,15 @@ deltawl <- wl_phys/WL_chem
 #             position = position_stack(vjust = 0.5), 
 #             color = "white", 
 #             size = 3)
-ggsave("~/GitHubRepos/CareyLabVT/Powell/Systematic/Plots/varswlchange.jpg", plot = deltawl, height = 5, width = 6.5, units = "in")
-ggsave("~/GitHubRepos/CareyLabVT/Powell/Systematic/Plots/vars.jpg", plot = varsplot, height = 5, width = 6.5, units = "in")
+ggsave(paste0(here(),"/Systematic/Plots/varswlchange.jpg"), plot = deltawl, height = 5, width = 6.5, units = "in")
+ggsave(paste0(here(),"/Systematic/Plots/vars.jpg"), plot = varsplot, height = 5, width = 6.5, units = "in")
 
 ```
 
-
 # phyto drivers for WL decreases.
-I don't think this actually adds much more info, so have abandoned this for now. Also, while we can distinguish the difference between increases and decreases in WL, so many studies had both an increase and a decrease that I don't think we can effectively differentiate. 
+
+I don't think this actually adds much more info, so have abandoned this for now. Also, while we can distinguish the difference between increases and decreases in WL, so many studies had both an increase and a decrease that I don't think we can effectively differentiate.
+
 ```{r WL change}
 phyto_only_drivers_up <- drivers |> 
   select(c(1:3, increase_phyto_response, increase_cyano_response, decrease_phyto_response, decrease_cyano_response, tp, 90:120)) |> 
@@ -2047,7 +2041,7 @@ phys <- physvars_phytos |>
 
 phytos <- phys/chem
 phytos
-ggsave("~/GitHubRepos/CareyLabVT/Powell/Systematic/Plots/phytovars.jpg", plot = phytos, height = 5, width = 6.5, units = "in")
+ggsave(paste0(here(),"/Systematic/Plots/phytovars.jpg"), plot = phytos, height = 5, width = 6.5, units = "in")
 
 
 ```
