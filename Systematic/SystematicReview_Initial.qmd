@@ -34,7 +34,7 @@ head(init_data)
 ```{r exclude papers}
 data_excl <- init_data |> 
   filter(!name_yr %in% c("Beaver 2013","Jia 2022","Cao 2016","Wang 2022","Kisand 2004", "Hart 2004", "Nõges 2010", "Tuvikene 2011", "Noges 1999", "Abirhire 2019", "Braga 2015", "Sakharova 2018", "Lacerda 2018")) |>
-  filter(res_name != "Dourado" | name_yr != "deMednonca 2018") |> 
+  filter(res_name != la"Dourado" | name_yr != "deMednonca 2018") |> 
   filter(!res_name == "Serra Serrada Reservoir") |>  #this is one of the reservoirs in Geraldes 2007
   filter(!title %in% c("Steady-state assemblages in a Mediterranean hypertrophic reservoir. The role of Microcystis ecomorphological variability in maintaining an apparent equilibrium")) |> #Naselli-Flores 2003
 #Data is either duplicated or more data is available in Hart 2006, so excluding Hart 2004

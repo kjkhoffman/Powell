@@ -1,0 +1,2318 @@
+---
+title: "SystematicReview_Final"
+format: html
+editor: visual
+---
+
+This script reads in the extracted data from the systematic literature review.
+
+## Libraries
+
+libraries for the whole script!
+
+```{r packages}
+#| message: false
+#| warning: false
+library(janitor)
+library(ggplot2)
+library(tidyverse)
+library(dplyr)
+
+library(rnaturalearth)
+library(rnaturalearthdata)
+library(mapview)
+
+library(naniar)
+
+library(sf)
+library(dplyr)
+library(rnaturalearth)
+library(rnaturalearthdata)
+
+library(here)
+library(plotly)
+library(patchwork)
+```
+
+#Read in data I preprocessed colnames for the data.
+
+```{r read in data}
+data <- "Systematic/Combined_08Oct.csv"
+init_data <- read.csv(here(data))
+init_data <- clean_names(init_data)
+head(init_data)
+```
+
+# QAQC
+
+## Excluded papers
+
+Papers were excluded for the following reasons:
+
+"Abirhire 2019": Has 2 years of data, Abirhire 2023 has 8 years of data BUT it's not presented in a way that is particularly usable \> doesn't fit as well. Excluded 2019 because that was our criteria
+
+Beaver 2013: we contacted the author and there was no WL data available
+
+Braga 2015: duplicate data with Medeiros paper, and Medeiros paper has an extra year of data
+
+Braga 2020: duplicated data with deMendonca paper, deMendonca paper has a few more months of data
+
+Cao 2016 & Jia 2022: Poyang
+
+Christensen 2015: Compared two rule curves, but didn't compare a high and low condition - the later rule curve generally meant higher water level, but not for all of the reservoirs. There's not a way to answer our questions with the data provided.
+
+Geraldes 2007 - Serra Serrada Reservoir: duplicate data with Geraldes 2005. Azivo Reservoir is still included from Geraldes 2007. Azivo Reservoir has no water level change and the compared time periods do not give a change in water level. 
+
+Hart 2004: Data is either duplicated or more data is available in Hart 2006, so excluding Hart 2004
+
+Kisand 2004 & Wang 2022: these papers were not clear enough to extract meaningful data from.
+
+Lacerda 2018: same data are available in Santos, and Lacerda has a stronger focus on remote sensing
+
+Naselli Flores 2003: duplicate data with other Naselli Flores 2003 paper, retained the one with more data
+
+Nõges 2010 & Tuvikene 2011 & Noges 1999: duplicate data with other Nõges papers
+
+Sakharova 2018: 3 years of data, Mineeva has longer time series
+
+Sharip: paper got duplicated, removed the duplicate version. Also, Bera lake not more than 4.5m deep
+
+```{r exclude papers}
+#| warning: false
+data_excl <- init_data |> 
+  filter(!name_yr %in% c("Beaver 2013","Jia 2022","Cao 2016","Wang 2022","Kisand 2004", "Hart 2004", "Nõges 2010", "Tuvikene 2011", "Christensen 2015", "Braga 2015", "Braga 2020", "Lacerda 2018", "Abirhire 2019", "Sakharova 2018", "Noges 1999", "Geraldes 2007")) |>
+  filter(!res_name == "Serra Serrada Reservoir") |> #Geraldes 2007
+  filter(!res_name == "Bera Lake") |> #Sharip 2019
+  filter(!title %in% c("Steady-state assemblages in a Mediterranean hypertrophic reservoir. The role of Microcystis ecomorphological variability in maintaining an apparent equilibrium")) |>
+  # filter(res_name != "Dourado" | name_yr != "deMednonca 2018") |> #Naselli-Flores 2003
+#Data is either duplicated or more data is available in Hart 2006, so excluding Hart 2004
+  filter(!notes %in% c("Ignore this version, everything has been added to multiple reservoirs sheet! KKH"))
+#Beaver no WL data
+#Jia 
+#duplicate Sharip
+
+excluded_papers <- anti_join(init_data, data_excl)
+
+duplicate_waterbodies <- data_excl |> 
+  select(name_yr, res_name, country, study_years, consecutive, phys_response, notes) #used this to order data alphabetically and manually check for dups that were not named exactly the same
+
+```
+
+## Typos, trophic levels
+
+Fix typos, add trophic levels based on chla and P concentrations if available
+
+Need to fix Vrutci - Water level increase is 626.7-621.3 and water level decrease is 621.3-615
+
+```{r fix some data}
+data <- data_excl |> 
+  mutate(tp = mean_tp) |> 
+  separate_wider_delim(mean_tp, " ", names = c("tp_ugL", "unit_tp"), too_few = "align_start") |> 
+  mutate(mean_chla = ifelse(mean_chla == "0.07 to 34.62 ug/L", "8", mean_chla)) |> #change Rai 1978 to 8ug/L, actual range between 0 and 14 ug/L, original range from pheophyton
+  mutate(mean_chla = ifelse(mean_chla == "15.7ug/L", "15.7 ug/L", mean_chla)) |> #fix missing space in chla value
+  mutate(chla = mean_chla) |> 
+  separate_wider_delim(mean_chla, " ", names = c("chla_ugL", "unit_chla"), too_few = "align_start") |>
+  mutate(res_name = ifelse(res_name == "Rybinsk", "Rybinsk Reservoir", #standardize reservoir names
+                    ifelse(res_name == "Cruzeta man-made lake", "Cruzeta", 
+                    ifelse(res_name == "Castanhao", "Castanhão reservoir",
+                    ifelse(name_yr == "Bouvy 2003", "Tapacura Reservoir", res_name))))) |> 
+  filter((!is.na(cov_num)|!is.na(num_water)|!is.na(lat_dd))) |> #remove empty or duplicate columns from the df
+  mutate(fullpond_sa = ifelse(fullpond_sa == "~600", 600, fullpond_sa), #fix character in numeric columns
+         fullpond_sa = as.numeric(fullpond_sa)) |> 
+   mutate(increase_phyto_response = ifelse(name_yr == "Li 2024", "Not measured", increase_phyto_response), 
+         increase_cyano_response = ifelse(name_yr == "Li 2024", "Not measured", increase_cyano_response)) |> # there was no water level increase recorded for this paper and it focused on the effects of water level decreases/reservoir operation that resulted
+  mutate(obs_maxdepth = ifelse(obs_maxdepth == "SEK had 12, 12 max at sampling station", 12, obs_maxdepth), #fix text in numeric columns
+         mindepth = ifelse(mindepth == "SEK had 9, 9 was min at sampling station", 9, mindepth)) |> 
+  mutate(elev_decrease_max = ifelse(grepl("2001", elev_decrease_max), "-6", elev_decrease_max), # to use the 2003 value
+         elev_increase_max = ifelse(elev_increase_max == 0, NA, elev_increase_max)) |> #to remove increases of 0
+  mutate(long_dd = ifelse(res_name == "Lake Buchanan", -98.4, long_dd), #fix incorrect latlongs
+         lat_dd = ifelse(lat_dd == 103.466667 & res_name == "Zipingpu Reservoir", 30.983333, lat_dd), 
+         long_dd = ifelse(long_dd == 30.983333 & res_name == "Zipingpu Reservoir", 103.466667, long_dd),
+         long_dd = ifelse(long_dd == 6.77888889 & res_name == "Serra Serrada", -6.77888889, long_dd)) |> 
+  mutate(tp_ugL = as.numeric(tp_ugL)) |> #add in trophic state based on phosphorus and chlorophyll values. 
+  mutate(mean_tp = case_when(
+    unit_tp == "mg/L" ~ tp_ugL * 1000, 
+    unit_tp == "mg/m3" ~ tp_ugL / 1000, 
+    TRUE ~ tp_ugL)) |> 
+  mutate(chla_ugL = as.numeric(chla_ugL)) |> 
+  mutate(mean_chla = case_when(
+    unit_chla == "mg/L" ~ chla_ugL * 1000, 
+    unit_chla == "mg/m3" ~ chla_ugL / 1000, 
+     TRUE ~ chla_ugL)) |> 
+  mutate(trophic = ifelse(trophic == "Other: according to authors, varies according to water level; never more than mesotrophic unless water level is low", "mesotrophic", trophic)) %>% 
+  mutate(trophic = ifelse(trophic == "", "not reported", trophic)) %>% 
+  mutate(chla_ugL = as.numeric(chla_ugL)) |>  
+  mutate(tp_ugL = as.numeric(tp_ugL)) |> 
+  mutate(trophic_status_chla = ifelse(trophic == "not reported" & chla_ugL <= 2.6, "oligotrophic", 
+                               ifelse(trophic == "not reported" & chla_ugL >2.6 & chla_ugL <=7.3, "mesotrophic", 
+                               ifelse(trophic == "not reported" & chla_ugL >7.3 & chla_ugL <= 56, "eutrophic", 
+                               ifelse(trophic == "not reported" & chla_ugL >56, "hypereutrophic",
+                               ifelse(trophic == "not reported" & is.na(chla_ugL), trophic, trophic)))))) %>% 
+  mutate(trophic_status_tp = ifelse(tp_ugL <= 12, "oligotrophic", 
+                             ifelse(tp_ugL >=12 & tp_ugL <=24, "mesotrophic", 
+                             ifelse(tp_ugL >24 & tp_ugL <= 70, "eutrophic", 
+                             ifelse(tp_ugL >70, "hypereutrophic",
+                             ifelse(is.na(tp_ugL), trophic, NA)))))) %>%  
+  mutate(trophic_status_combined = ifelse(trophic == "not reported" & !is.na(trophic_status_tp), trophic_status_tp,
+                                   ifelse(trophic == "not reported" & !is.na(trophic_status_chla), trophic_status_chla, trophic))) |> 
+  mutate(trophic_status_reduced = ifelse(trophic_status_combined %in% c("oligotrophic"), "oligotrophic", #combine multi trophic state options
+                                  ifelse(trophic_status_combined %in% c("oligo-mesotrophic", "mesotrophic"), "mesotrophic", 
+                                  ifelse(trophic_status_combined %in% c("meso-eutrophic", "eutrophic"), "eutrophic", 
+                                  ifelse(trophic_status_combined %in% c("hypereutrophic", "eu-hypereutrophic"), "hypereutrophic", "not reported"))))) |> 
+  filter(res_name != "") #remove any rows that don't have a reservoir name because they are duplicate with reservoirs in the multiple reservoir sheet
+write_csv(data, here("Systematic/qaqced.csv"))
+```
+
+#Quick info
+
+```{r quick study info}
+#number of waterbodies
+reservoirs <- data |> select(c(res_name)) |> unique()
+#there are a total of 4 TGRs, so there are 64-3 reservoirs, = 61 total lakes!
+countries <- data |> select(c(country)) |> unique() #25 countries - Argentina/Uruguay, Estonia/Russia, one blank = 22 total countries
+studies <- data |> select(c(name_yr)) |> unique() #60 studies, some duplicate authors but no duplicate studies.
+```
+
+# Plots
+
+## Trophic Levels
+
+```{r trophic levels}
+#consider subsetting these to phyto and cyano specific studies?
+
+non_dups <- data |> select(res_name, trophic_status_reduced) |> 
+  unique()
+
+#plot only reduced trophic state levels and only reservoirs that are not duplicated
+#from 81 > 72
+trophic <- non_dups |> 
+  filter(trophic_status_reduced != "not reported") |> 
+  ggplot(aes(x= factor(trophic_status_reduced, c("oligotrophic", "mesotrophic", "eutrophic", "hypereutrophic")))) + 
+  geom_bar(fill = "#608687") +
+  xlab("Trophic Status") +
+  ylab("Number of reservoirs") + 
+  theme_bw() +
+  #theme(axis.text.x = element_text(angle = 45, vjust = 0.5, hjust=1))+
+  #theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))+
+  geom_text(aes(label = ..count..), stat = "count", vjust = 1.5, size = 5, colour = "black")
+
+trophic
+ggsave("~/GitHubRepos/CareyLabVT/Powell/Systematic/Plots/trophic.jpg", plot = trophic, height = 3, width = 6.5, units = "in")
+
+```
+
+
+Phytoplankton drivers
+
+List of physical variables that we extracted that were measured and considered as drivers:
+water temperature
+water level
+secchi/transparency
+light(PAR, photic zone)
+turbidity
+total suspended solids
+total dissolved solids
+other
+
+chemical variables
+pH
+DO
+DOC
+DIC
+DOM
+POM
+TP
+SRP
+ORP (orthophosphate)
+TN
+TKN
+NO3
+NO2
+NH4
+DIN
+metals 
+cond
+salinity
+other
+
+## Phytoplankton drivers
+
+```{r}
+drivers <- data |> 
+  # mutate(filt_chla = ifelse(grepl("filtered chlorophyll", bio_vars), 1, 0),                       #biotic variables
+  #        phyto_micros = ifelse(grepl("phytoplankton microscopy", bio_vars), 1, 0), 
+  #        single_cyano_taxon = ifelse(grepl("single cyanobacterial taxon", bio_vars), 1, 0), 
+  #        sensor_chla = ifelse(grepl("sensor", bio_vars), 1, 0),
+  #       # sensor_chla = ifelse(grepl("sensor", bio_vars), 1, 0),
+  #        other_bio = ifelse(grepl("Other", bio_vars), 1, 0)) |> 
+  mutate(tp = ifelse(grepl("TP", chem_drive), 1, 0),                            #chemical variables
+         tn = ifelse(grepl("TN", chem_drive), 1, 0), 
+         nh4 = ifelse(grepl("NH4", chem_drive), 1, 0), 
+         ph = ifelse(grepl("pH", chem_drive), 1, 0),
+         do = ifelse(grepl("DO", chem_drive), 1, 0),
+         srp = ifelse(grepl("SRP", chem_drive), 1, 0),
+         no3 = ifelse(grepl("NO3", chem_drive), 1, 0),
+         cond = ifelse(grepl("conductivity", chem_drive), 1, 0),
+         metals = ifelse(grepl("metals", chem_drive), 1, 0),
+         orp = ifelse(grepl("ORP", chem_drive), 1, 0),
+         no2 = ifelse(grepl("NO2", chem_drive), 1, 0),
+         dic = ifelse(grepl("DIC", chem_drive), 1, 0),
+       dom = ifelse(grepl("DOM", chem_drive), 1, 0),
+       pom = ifelse(grepl("POM", chem_drive), 1, 0),
+       tkn = ifelse(grepl("TKN", chem_drive), 1, 0),
+         doc = ifelse(grepl("DOC", chem_drive), 1, 0),
+         din = ifelse(grepl("DIN", chem_drive), 1, 0),
+         ph = ifelse(grepl("pH", chem_drive), 1, 0),
+         salinity = ifelse(grepl("salinity", chem_drive), 1, 0), 
+         other_chem = ifelse(grepl("Other", chem_drive), 1, 0)) |> 
+  mutate(water_level = ifelse(grepl("water level", phys_drive), 1, 0), 
+         water_temp = ifelse(grepl("water temperature", phys_drive), 1, 0),
+         transparency = ifelse(grepl("transparency", phys_drive), 1, 0),
+         turb = ifelse(grepl("turbidity", phys_drive), 1, 0),
+         light = ifelse(grepl("PAR", phys_drive), 1, 0),    #need to pull out rainfall & precipitation, stability/, water residence time, flushing
+         tss_tds = ifelse(grepl("total suspended solids|tss|tds|total dissolved solid", phys_drive), 1, 0), 
+         strat = ifelse(grepl("mix|stab|strat", phys_drive), 1, 0),
+         restime = ifelse(grepl("residence", phys_drive), 1, 0), 
+         flush_discharge = ifelse(grepl("flush|discharge", phys_drive), 1, 0), 
+         inflow = ifelse(grepl("inflow", phys_drive), 1, 0),
+         precip = ifelse(grepl("precip|rain", phys_drive), 1, 0),
+         air_temp = ifelse(grepl("air", phys_drive), 1, 0),
+         other_phys = ifelse(grepl("Other", phys_drive), 1, 0))
+
+other_phys <- drivers |> 
+  filter(other_phys == 1) |> 
+  select(name_yr, title, num_water, phys_drive)
+
+  unique(data$phys_response)
+  
+  #WLchangevars is whether or not vars changed under WL change
+WLchangevars <- data |> 
+mutate(not_assessed = ifelse(grepl("not assessed", phys_response), 1, 0), 
+         water_temp = ifelse(grepl("water temperature", phys_response), 1, 0),
+         transparency = ifelse(grepl("transparency", phys_response), 1, 0),
+         turb = ifelse(grepl("turbidity", phys_response), 1, 0),
+         light = ifelse(grepl("PAR", phys_response), 1, 0),    #need to pull out rainfall & precipitation, stability/, water residence time, flushing
+         tss_tds = ifelse(grepl("total suspended solids|tss|tds|total dissolved solid|sediment resuspension", phys_response), 1, 0), 
+         #strat = ifelse(grepl("mix|stab|strat", phys_response), 1, 0),
+         #restime = ifelse(grepl("residence", phys_response), 1, 0), 
+         #flush_discharge = ifelse(grepl("flush|discharge", phys_response), 1, 0), 
+         #inflow = ifelse(grepl("inflow", phys_response), 1, 0),
+         #precip = ifelse(grepl("precip|rain", phys_response), 1, 0),
+         #air_temp = ifelse(grepl("air", phys_response), 1, 0),
+         other_phys = ifelse(grepl("Other", phys_response), 1, 0), 
+       watercolor = ifelse(grepl("water color", phys_response), 1, 0)) |> 
+mutate(tp = ifelse(grepl("TP", chem_response), 1, 0),                            #chemical variables
+         tn = ifelse(grepl("TN", chem_response), 1, 0), 
+         nh4 = ifelse(grepl("NH4", chem_response), 1, 0), 
+         ph = ifelse(grepl("pH", chem_response), 1, 0),
+         do = ifelse(grepl("DO", chem_response), 1, 0),
+         srp = ifelse(grepl("SRP", chem_response), 1, 0),
+         no3 = ifelse(grepl("NO3", chem_response), 1, 0),
+         cond = ifelse(grepl("conductivity", chem_response), 1, 0),
+         metals = ifelse(grepl("metals", chem_response), 1, 0),
+         orp = ifelse(grepl("ORP", chem_response), 1, 0),
+         no2 = ifelse(grepl("NO2", chem_response), 1, 0),
+         doc = ifelse(grepl("DOC", chem_response), 1, 0),
+       dic = ifelse(grepl("DIC", chem_response), 1, 0),
+       dom = ifelse(grepl("DOM", chem_response), 1, 0),
+       pom = ifelse(grepl("POM", chem_response), 1, 0),
+       tkn = ifelse(grepl("TKN", chem_response), 1, 0),
+         din = ifelse(grepl("DIN", chem_response), 1, 0),
+         ph = ifelse(grepl("pH", chem_response), 1, 0),
+         salinity = ifelse(grepl("salinity", chem_response), 1, 0), 
+         other_chem = ifelse(grepl("Other", chem_response), 1, 0)) 
+
+#spread vars is whether or not the var was measured
+spreadvars <- data |> 
+  mutate(filt_chla = ifelse(grepl("filtered chlorophyll", bio_vars), 1, 0),                       #biotic variables
+         phyto_micros = ifelse(grepl("phytoplankton microscopy", bio_vars), 1, 0), 
+         single_cyano_taxon = ifelse(grepl("single cyanobacterial taxon", bio_vars), 1, 0), 
+         sensor_chla = ifelse(grepl("sensor", bio_vars), 1, 0),
+        # sensor_chla = ifelse(grepl("sensor", bio_vars), 1, 0),
+         other_bio = ifelse(grepl("Other", bio_vars), 1, 0)) |> 
+  mutate(tp = ifelse(grepl("TP", chem_vars), 1, 0),                            #chemical variables
+         tn = ifelse(grepl("TN", chem_vars), 1, 0), 
+         nh4 = ifelse(grepl("NH4", chem_vars), 1, 0), 
+         ph = ifelse(grepl("pH", chem_vars), 1, 0),
+         do = ifelse(grepl("DO", chem_vars), 1, 0),
+         srp = ifelse(grepl("SRP", chem_vars), 1, 0),
+         no3 = ifelse(grepl("NO3", chem_vars), 1, 0),
+         cond = ifelse(grepl("conductivity", chem_vars), 1, 0),
+         metals = ifelse(grepl("metals", chem_vars), 1, 0),
+         orp = ifelse(grepl("ORP", chem_vars), 1, 0),
+         no2 = ifelse(grepl("NO2", chem_vars), 1, 0),
+         doc = ifelse(grepl("DOC", chem_vars), 1, 0),
+          dic = ifelse(grepl("DIC", chem_vars), 1, 0),
+       dom = ifelse(grepl("DOM", chem_vars), 1, 0),
+       pom = ifelse(grepl("POM", chem_vars), 1, 0),
+       tkn = ifelse(grepl("TKN", chem_vars), 1, 0),
+         din = ifelse(grepl("DIN", chem_vars), 1, 0),
+         ph = ifelse(grepl("pH", chem_vars), 1, 0),
+         salinity = ifelse(grepl("salinity", chem_vars), 1, 0), 
+         other_chem = ifelse(grepl("Other", chem_vars), 1, 0)) |> 
+  mutate(water_level = ifelse(grepl("water level", phys_vars), 1, 0), 
+         water_temp = ifelse(grepl("water temperature", phys_vars), 1, 0),
+         transparency = ifelse(grepl("transparency", phys_vars), 1, 0),
+         turb = ifelse(grepl("turbidity", phys_vars), 1, 0),
+         light = ifelse(grepl("PAR", phys_vars), 1, 0),    #need to pull out rainfall & precipitation, stability/, water residence time, flushing
+        tss_tds = ifelse(grepl("total suspended solids|tss|tds|total dissolved solid|sediment resuspension", phys_vars), 1, 0), 
+         #strat = ifelse(grepl("mix|stab|strat", phys_vars), 1, 0),
+        # restime = ifelse(grepl("residence", phys_vars), 1, 0), 
+        # flush_discharge = ifelse(grepl("flush|discharge", phys_vars), 1, 0), 
+        # inflow = ifelse(grepl("inflow", phys_vars), 1, 0),
+        # precip = ifelse(grepl("precip|rain", phys_vars), 1, 0),
+        # air_temp = ifelse(grepl("air", phys_vars), 1, 0),
+         other_phys = ifelse(grepl("Other", phys_vars), 1, 0)) 
+        # watercolor = ifelse(grepl("water color", phys_vars), 1, 0))
+
+
+unique(data$chem_drive)
+unique(data$phys_drive)
+
+# vars <- drivers |> select(c(filt_chla, phyto_micros, single_cyano_taxon, sensor_chla, other_bio, other_chem, tp, tn, nh4, ph, do, srp, no3, cond, metals, orp, no2, doc, din, ph, salinity))
+
+chemvars_drive <- drivers |> select(c(cond, do, nh4, no2, no3, orp, ph, srp, tn, tp))
+chemvarsWL <- WLchangevars |> select(c(cond, do, nh4, no2, no3, orp, ph, srp, tn, tp))
+physvars_drive <- drivers |> select(c(water_level, water_temp, transparency, turb, light, tss_tds, other_phys))
+#physvarsWL <- WLchangevars |> select(c(water_temp, transparency, turb, light, tss_tds, other_phys, strat, restime, flush_discharge, inflow, precip, air_temp))
+physvarsWL <- WLchangevars |> select(c(water_temp, transparency, turb, light, tss_tds, other_phys))
+# summary(vars) 
+
+freqchem <- as.data.frame(colSums(chemvars_drive))
+
+chemvars_drive <- setNames(cbind(rownames(freqchem), freqchem, row.names = NULL), 
+         c("names", "sum"))
+
+freqchemWL <- as.data.frame(colSums(chemvarsWL))
+
+chemvarsWL <- setNames(cbind(rownames(freqchemWL), freqchemWL, row.names = NULL), 
+         c("names", "sum"))
+
+freqphys <- as.data.frame(colSums(physvars_drive))
+freqphysWL <- as.data.frame(colSums(physvarsWL))
+rm(physvars_drive)
+physvars2_drive <- setNames(cbind(rownames(freqphys), freqphys, row.names = NULL), 
+         c("names", "sum"))
+
+physvars2WL <- setNames(cbind(rownames(freqphysWL), freqphysWL, row.names = NULL), 
+         c("names", "sum"))
+```
+
+```{r}
+#separate out phytoplankton and cyanobacteria drivers
+phyto_only_drivers <- drivers |> 
+  select(c(1:3, increase_phyto_response, increase_cyano_response, decrease_phyto_response, decrease_cyano_response, tp, 90:125)) |> 
+  filter(increase_phyto_response != "" & increase_phyto_response != "Not measured" | decrease_phyto_response != "" & decrease_phyto_response != "Not measured")
+
+cyano_only_drivers <- drivers |> 
+  select(c(1:3, increase_phyto_response, increase_cyano_response, decrease_phyto_response, decrease_cyano_response, tp, 90:125)) |> 
+  filter(increase_cyano_response != "" & increase_cyano_response != "Not measured" | decrease_cyano_response != "" & decrease_cyano_response != "Not measured")
+
+#WL change vars
+phyto_only_WLchangevars <- WLchangevars |> 
+  select(c(1:3, increase_phyto_response, increase_cyano_response, decrease_phyto_response, decrease_cyano_response, tp, 90:120)) |> 
+  filter(increase_phyto_response != "" & increase_phyto_response != "Not measured" | decrease_phyto_response != "" & decrease_phyto_response != "Not measured")
+
+cyano_only_WLchangevars <- WLchangevars |> 
+  select(c(1:3, increase_phyto_response, increase_cyano_response, decrease_phyto_response, decrease_cyano_response, tp, 90:120)) |> 
+  filter(increase_cyano_response != "" & increase_cyano_response != "Not measured" | decrease_cyano_response != "" & decrease_cyano_response != "Not measured")
+
+#not WL change vars! This is anything measured
+phyto_only_vars <- spreadvars |> 
+  select(c(1:3, increase_phyto_response, increase_cyano_response, decrease_phyto_response, decrease_cyano_response, tp, 90:124)) |> 
+  filter(increase_phyto_response != "" & increase_phyto_response != "Not measured" | decrease_phyto_response != "" & decrease_phyto_response != "Not measured")
+
+cyano_only_vars <- spreadvars |> 
+  select(c(1:3, increase_phyto_response, increase_cyano_response, decrease_phyto_response, decrease_cyano_response, tp, 90:124)) |> 
+  filter(increase_cyano_response != "" & increase_cyano_response != "Not measured" | decrease_cyano_response != "" & decrease_cyano_response != "Not measured")
+
+chemvars_drive_phytos <- phyto_only_drivers |> select(c(cond, do, nh4, no2, no3, orp, ph, srp, tn, tp))
+
+#only including variables that were measured at least 10 times in the extracted data
+chemvars_phytos <- phyto_only_vars |> select(c(cond, do, nh4, no2, no3, orp, ph, srp, tn, tp))
+
+physvars_drive_phytos <- phyto_only_drivers |> select(c(water_level, water_temp, transparency, turb, light, tss_tds, other_phys))
+
+# physvarsWL_phytos <- phyto_only_WLchangevars |> select(c(water_temp, transparency, turb, light, tss_tds, other_phys, strat, restime, flush_discharge, inflow, precip, air_temp))
+
+physvars_phytos <- phyto_only_vars |> select(c(water_temp, water_level, transparency, turb, light, tss_tds, other_phys))
+# summary(vars) 
+
+freqchem_drive_phytos <- as.data.frame(colSums(chemvars_drive_phytos))
+chemvars_drive_phytos <- setNames(cbind(rownames(freqchem_drive_phytos), freqchem_drive_phytos, row.names = NULL), 
+         c("names", "sum"))
+# freqchemWL_phyto <- as.data.frame(colSums(chemvarsWL_phytos))
+freqchem_phyto <- as.data.frame(colSums(chemvars_phytos))
+# chemvarsWL_phytos <- setNames(cbind(rownames(freqchemWL), freqchemWL_phyto, row.names = NULL), 
+#          c("names", "sum"))
+chemvars_phytos <- setNames(cbind(rownames(freqchem_phyto), 
+                                  freqchem_phyto, row.names = NULL), c("names", "sum"))
+
+# chemvarsWL |> ggplot(aes(x = names, y = sum)) + geom_bar(stat = "identity") + 
+#   theme(axis.text.x = element_text(angle = 45, vjust = 0.5, hjust=1)) +  ggtitle("Chem variables that changed in response to WL")
+# want a comparison with what was measured!
+chemvars1_phytos <- chemvars_phytos |> 
+  rename(measured = sum, 
+         name = names)
+
+# drivers identified out of all vars measured
+chemicalvars_phytos <- cbind(chemvars1_phytos, chemvars_drive_phytos)
+
+chem <- chemicalvars_phytos |> 
+  filter(!name == "other_chem") |> 
+  select(c(names, measured, sum)) |> 
+  rename(id = sum) |> 
+  mutate(notid = measured - id,
+         prop_id = id / measured) |>            # calculate proportion
+  select(c(names, id, notid, prop_id)) |> 
+  arrange(desc(prop_id)) |>                     # order by highest proportion
+  mutate(names = factor(names, levels = names)) |> 
+  select(-prop_id) |>                           # remove helper column
+  pivot_longer(!names, names_to = "driver", values_to = "count") |> 
+  ggplot(aes(fill = driver, y = count, x = names)) +
+  geom_bar(position = "fill", stat = "identity") + 
+  ggtitle("Chemical Variables") + 
+  geom_text(aes(label = count),
+            position = position_fill(vjust = 0.5), 
+            color = "black", 
+            size = 3) + 
+  scale_fill_manual(values = c("#99bbab", "#ddefcd")) +
+  theme_bw() + 
+  labs(y = "") +
+  theme(axis.text.x  = element_text(hjust = .5, size = 6),
+        axis.title.x = element_blank(),
+        axis.title.y = element_text(angle = 90, vjust = .5, size = 12))
+
+#physical variables
+
+freqphys_drive <- as.data.frame(colSums(physvars_drive_phytos))
+# freqphysWL <- as.data.frame(colSums(physvarsWL_phytos))
+freqphys_phytos <- as.data.frame(colSums(physvars_phytos))
+
+physvars2_drive_phytos <- setNames(cbind(rownames(freqphys_drive), freqphys_drive, row.names = NULL), 
+         c("names", "sum"))
+
+physvars1_phytos <- setNames(cbind(rownames(freqphys_phytos), freqphys_phytos, row.names = NULL), 
+         c("name", "measured"))
+
+physvars_phytos <- cbind(physvars1_phytos, physvars2_drive_phytos)
+
+phys <- physvars_phytos |> 
+    select(c(names, measured, sum)) |> 
+  filter(!names == "other_phys") |> 
+  rename(id = sum) |> 
+   mutate(notid = measured - id,
+         prop_id = id / measured) |>            # calculate proportion
+  select(c(names, id, notid, prop_id)) |> 
+  arrange(desc(prop_id)) |>                     # order by highest proportion
+  mutate(names = factor(names, levels = names)) |> 
+  select(-prop_id) |>    
+  select(c(names, id, notid)) |> 
+  mutate(notid = ifelse(notid <0, 0, notid)) |> 
+  pivot_longer(!names, names_to = "driver", values_to = "count") |> 
+  ggplot(aes(fill = driver, y = count, x = names)) +
+  geom_bar(position = "fill", stat = "identity") +
+  # theme(axis.text.x = element_text(angle = 45, vjust = 0.5, hjust=1)) + 
+  theme(axis.text.x = element_text(vjust = 0.5)) + 
+  ggtitle("Physical Variables") + 
+  geom_text(aes(label = count),
+            position = position_fill(vjust = 0.5), 
+            color = "black", 
+            size = 3) + 
+  scale_fill_manual(values = c("#99bbab", "#ddefcd")) + theme_bw() + 
+   labs(y = "Proportion") +
+    theme(axis.text.x  = element_text(hjust = .5, size = 6),
+          axis.title.x = element_blank(),
+          axis.title.y = element_text(angle = 90, vjust = .5, size = 12),
+          legend.position = "none")
+
+phytos <- phys/chem
+phytos
+ggsave("~/GitHubRepos/CareyLabVT/Powell/Systematic/Plots/phytovars.jpg", plot = phytos, height = 5, width = 6.5, units = "in")
+
+```
+
+```{r cyanos vars only}
+# chemvars_drive_cyanos <- cyano_only_drivers |> select(c(other_chem, tp, tn, nh4, ph, do, srp, no3, cond, metals, orp, no2, doc, din, ph, salinity, dom, pom, dic, tkn))
+
+# only vars that have more than 10
+chemvars_drive_cyanos <- cyano_only_drivers |> select(c(cond, do, nh4, no2, no3, ph, srp, tn, tp))
+
+chemvars_cyanos <- cyano_only_vars |> select(c(cond, do, nh4, no2, no3, ph, srp, tn, tp))
+
+physvars_drive_cyanos <- cyano_only_drivers |> select(c(water_level, water_temp, transparency, turb, light, tss_tds))
+
+# physvarsWL_phytos <- phyto_only_WLchangevars |> select(c(water_temp, transparency, turb, light, tss_tds, other_phys, strat, restime, flush_discharge, inflow, precip, air_temp))
+
+physvars_cyanos <- cyano_only_vars |> select(c(water_temp, transparency, turb, light, tss_tds, water_level))
+
+physvars_cyanos <- cyano_only_vars |> select(c(water_temp, transparency, turb, light, tss_tds, water_level))
+# summary(vars) 
+
+freqchem_drive_cyanos <- as.data.frame(colSums(chemvars_drive_cyanos))
+chemvars_drive_cyanos <- setNames(cbind(rownames(freqchem_drive_cyanos), freqchem_drive_cyanos, row.names = NULL), 
+         c("names", "sum"))
+# freqchemWL_cyano <- as.data.frame(colSums(chemvarsWL_cyanos))
+freqchem_cyano <- as.data.frame(colSums(chemvars_cyanos))
+# chemvarsWL_cyanos <- setNames(cbind(rownames(freqchemWL), freqchemWL_cyano, row.names = NULL), 
+#          c("names", "sum"))
+chemvars_cyanos <- setNames(cbind(rownames(freqchem_cyano), 
+                                  freqchem_cyano, row.names = NULL), c("names", "sum"))
+
+# chemvarsWL |> ggplot(aes(x = names, y = sum)) + geom_bar(stat = "identity") + 
+#   theme(axis.text.x = element_text(angle = 45, vjust = 0.5, hjust=1)) +  ggtitle("Chem variables that changed in response to WL")
+# want a comparison with what was measured!
+chemvars1_cyanos <- chemvars_cyanos |> 
+  rename(measured = sum, 
+         name = names)
+chemicalvars_cyanos <- cbind(chemvars1_cyanos, chemvars_drive_cyanos)
+
+chemvars_cyanos_drivers <- chemicalvars_cyanos |> 
+  select(c(names, measured, sum)) |> 
+  rename(id = sum) |> 
+   mutate(notid = measured - id,
+         prop_id = id / measured) |>            # calculate proportion
+  select(c(names, id, notid, prop_id)) |> 
+  arrange(desc(prop_id)) |>                     # order by highest proportion
+  mutate(names = factor(names, levels = names)) |> 
+  select(-prop_id) |>    
+  select(c(names, id, notid)) |> 
+  pivot_longer(!names, names_to = "driver", values_to = "count") |> 
+  ggplot(aes(fill = driver, y = count, x = names))+
+  geom_bar(position = "fill", stat = "identity") + 
+ # ggtitle("Proportion Chemical variables that were identified as drivers, cyano only" ) + 
+  geom_text(aes(label = count),
+            position = position_fill(vjust = 0.5), 
+            color = "black", 
+            size = 3) + 
+  scale_fill_manual(values = c("#4dd0e1","#b2ebf2")) + theme_bw() + 
+    labs(y = "") +
+    theme(axis.text.x  = element_text(hjust = .5, size = 6),
+          axis.title.x = element_blank(),
+          axis.title.y = element_text(angle = 90, vjust = .5, size = 12))
+
+#physical variables
+
+freqphys_drive <- as.data.frame(colSums(physvars_drive_cyanos))
+# freqphysWL <- as.data.frame(colSums(physvarsWL_cyanos))
+freqphys_cyanos <- as.data.frame(colSums(physvars_cyanos))
+
+physvars2_drive_cyanos <- setNames(cbind(rownames(freqphys_drive), freqphys_drive, row.names = NULL), 
+         c("names", "sum"))
+
+physvars1_cyanos <- setNames(cbind(rownames(freqphys_cyanos), freqphys_cyanos, row.names = NULL), 
+         c("name", "measured"))
+
+physvars_cyanos <- cbind(physvars1_cyanos, physvars2_drive_cyanos)
+
+physvars_cyanos_drivers <- physvars_cyanos |> 
+  select(c(names, measured, sum)) |> 
+  rename(id = sum) |> 
+ mutate(notid = measured - id,
+         prop_id = id / measured) |>            # calculate proportion
+  select(c(names, id, notid, prop_id)) |> 
+  arrange(desc(prop_id)) |>                     # order by highest proportion
+  mutate(names = factor(names, levels = names)) |> 
+  select(-prop_id) |>    
+  select(c(names, id, notid)) |> 
+  mutate(notid = ifelse(notid <0, 0, notid)) |> 
+  pivot_longer(!names, names_to = "driver", values_to = "count") |> 
+  ggplot(aes(fill = driver, y = count, x = names)) +
+  geom_bar(position = "fill", stat = "identity") +
+  theme(axis.text.x = element_text(angle = 45, vjust = 0.5, hjust=1)) + 
+ # ggtitle("Phys driver variables, cyano only") + 
+  geom_text(aes(label = count),
+            position = position_fill(vjust = 0.5), 
+            color = "black", 
+            size = 3) + 
+  scale_fill_manual(values = c("#4dd0e1","#b2ebf2")) + theme_bw() + 
+    labs(y = "Proportion") +
+    theme(axis.text.x  = element_text(hjust = .5, size = 6),
+          axis.title.x = element_blank(),
+          axis.title.y = element_text(angle = 90, vjust = .5, size = 12),
+          legend.position = "none")
+
+cyanos <- physvars_cyanos_drivers/chemvars_cyanos_drivers
+cyanos
+ggsave("~/GitHubRepos/CareyLabVT/Powell/Systematic/Plots/cyanodrivervars.jpg", plot = cyanos, height = 5, width = 6.5, units = "in")
+
+combined <- (physvars_cyanos_drivers/chemvars_cyanos_drivers) | (phys / chem)
+combined <- (phys/physvars_cyanos_drivers) | (chem/chemvars_cyanos_drivers)
+combined
+
+ggsave("~/GitHubRepos/CareyLabVT/Powell/Systematic/Plots/drivers_cyanophyto.jpg", plot = combined, height = 4, width = 8, units = "in")
+```
+
+## Map
+
+Make map figure.
+
+```{r}
+
+na_strings <- c("NA", "N A", "N / A", "N/A", "N/ A", "Not Available", "NOt available", "", "not reported")
+
+ latlong <- data %>%
+  mutate(
+    study_years = ifelse(
+      grepl("36 \\(satellite data\\); 12 \\(field data\\)", study_years),"12", 
+      ifelse(grepl("36 \\(satellite data\\); 2 \\(field data\\)", study_years),"2",study_years)), 
+    study_years = as.numeric(study_years)) |> 
+  mutate(depth_m = ifelse(!is.na(fullpond_maxdepth), fullpond_maxdepth, obs_maxdepth), 
+         depth_m = as.numeric(depth_m), 
+         years_studied = ifelse(study_years == 1, "1", 
+                                ifelse(study_years >1 & study_years <=5, "2-5", 
+                                       ifelse(study_years >5 & study_years <= 10, "6-10", 
+                                              ifelse(study_years > 10, "more than 10", NA)))), 
+         years_studied = factor(years_studied, levels = c("1", "2-5", "6-10", "more than 10"))) |> 
+  select("lat_dd", "long_dd", "res_name", "decrease_phyto_response", "increase_phyto_response", "decrease_cyano_response", "increase_cyano_response", "depth_m", "trophic_status_reduced", "years_studied") |> 
+  mutate(lat_dd = ifelse(lat_dd == 103.466667 & res_name == "Zipingpu Reservoir", 30.983333, lat_dd)) |> 
+  mutate(long_dd = ifelse(long_dd == 30.983333 & res_name == "Zipingpu Reservoir", 103.466667, long_dd)) |> 
+  mutate(long_dd = ifelse(long_dd == 6.77888889 & res_name == "Serra Serrada", -6.77888889, long_dd)) |> 
+    replace_with_na_all(condition = ~.x %in% na_strings) |> 
+    subset(!is.na(long_dd)) |>  
+  subset(!is.na(lat_dd)) |> 
+  mutate(increase_phyto_response = ifelse(increase_phyto_response == "Not measured"|increase_phyto_response == ""|(grepl("Other", increase_phyto_response)), NA, increase_phyto_response)) |>
+    mutate(decrease_phyto_response = ifelse(decrease_phyto_response == "Not measured"|decrease_phyto_response == ""|(grepl("Other", decrease_phyto_response)), NA, decrease_phyto_response)) |>
+   mutate(increase_cyano_response = ifelse(increase_cyano_response == "Not measured"|increase_cyano_response == ""|(grepl("Other", increase_cyano_response)), NA, increase_cyano_response)) |>
+   mutate(decrease_cyano_response = ifelse(decrease_cyano_response == "Not measured"|decrease_cyano_response == ""|(grepl("Other", decrease_cyano_response)), NA, decrease_cyano_response)) |>
+  filter(!(is.na(decrease_phyto_response) & is.na(increase_phyto_response) & is.na(decrease_cyano_response) & is.na(increase_cyano_response))) %>%
+  mutate(increase_decrease_mosaic = ifelse(((!is.na(decrease_phyto_response) | !is.na(decrease_cyano_response)) & (!is.na(increase_phyto_response) | !is.na(increase_cyano_response))),"Both",
+                                           ifelse((!is.na(decrease_phyto_response) | !is.na(decrease_cyano_response)),"Decrease",
+                                                  ifelse((!is.na(increase_phyto_response) | !is.na(increase_cyano_response)),"Increase", NA))))
+
+world <- ne_countries(scale = "medium", returnclass = "sf")
+#world <- map_data("world")
+
+litdata_map <- latlong %>% 
+  mutate(decrease_phyto_response = ifelse(decrease_phyto_response == "Not measured", NA, decrease_phyto_response), 
+         increase_phyto_response = ifelse(increase_phyto_response == "Not measured", NA, increase_phyto_response), 
+         decrease_cyano_response = ifelse(decrease_cyano_response == "Not measured", NA, decrease_cyano_response), 
+         increase_cyano_response = ifelse(increase_cyano_response == "Not measured", NA, increase_cyano_response)) |> 
+   mutate(mapvals = ifelse(((!is.na(decrease_phyto_response)|!is.na(increase_phyto_response)) & (!is.na(decrease_cyano_response)|!is.na(increase_cyano_response))), "Both",
+                           ifelse(!is.na(decrease_phyto_response)|!is.na(increase_phyto_response), "Phytoplankton", 
+                                 ifelse(!is.na(decrease_cyano_response)|!is.na(increase_cyano_response), "Cyanobacteria", NA)))) 
+
+litdata_map_sf <- st_as_sf(litdata_map,
+                           coords = c("long_dd", "lat_dd"),
+                           crs = 4326,
+                           remove = FALSE)
+
+sitemap <- ggplot(world) +
+  geom_sf(fill = "white") +
+ # coord_sf(crs = 4269) +
+  #scale_fill_manual(aesthetics = "white", color = "black") +
+  #geom_sf_label(stat = "sf_coordinates")+
+  geom_sf(data = litdata_map_sf,
+          aes(shape = as.factor(mapvals),
+              color = as.factor(mapvals)),
+          size = 2) +
+  #scale_fill_manual(values = c("white", "#88CCEE"), name = "Countries") +
+  scale_color_manual(values = c("#608687", "#4dd0e1", "darkgreen"),
+                     name = "Variable") +
+  scale_shape_manual(values = c(16, 17, 18),
+                     name = "Variable")  +
+  coord_sf() +
+  theme_minimal()
+sitemap
+
+sitemap_trophic <- ggplot(world) +
+  geom_sf(data = world, fill = "white") +
+  #coord_sf(crs = 4269) +
+  #scale_fill_manual(aesthetics = "white") +
+  #geom_sf_label(stat = "sf_coordinates")+
+  # geom_sf(data = litdata_map_sf,
+  #         aes(shape = as.factor(mapvals),
+  #             color = as.factor(increase_decrease_mosaic))) +
+    geom_sf(data = litdata_map_sf, size = 2, alpha = 0.7,
+          aes(color = as.factor(increase_decrease_mosaic))) +
+  #scale_fill_manual(values = c("white", "#88CCEE"), name = "Countries") +
+  scale_color_manual(values = c("#7A5FA8", "#C65A6A", "#3F7FA6"),
+                     name = "Does water level \nincrease or decrease? \n") +
+  scale_shape_manual(values = c(16, 17, 18),
+                     name = "Variable")  +
+  theme_minimal() + 
+  guides(colour = guide_legend(override.aes = list(size=6))) +
+  theme(legend.text  = element_text(size = 12),
+        legend.title = element_text(size = 12))
+sitemap_trophic
+
+sitemap_years <- ggplot(world) +
+  geom_sf(data = world, fill = "white") +
+  #coord_sf(crs = 4269) +
+  #scale_fill_manual(aesthetics = "white") +
+  #geom_sf_label(stat = "sf_coordinates")+
+  # geom_sf(data = litdata_map_sf,
+  #         aes(shape = as.factor(mapvals),
+  #             color = as.factor(increase_decrease_mosaic))) +
+    geom_sf(data = litdata_map_sf, size = 2, alpha = 0.6,
+          aes(color = as.factor(years_studied))) +
+  #scale_fill_manual(values = c("white", "#88CCEE"), name = "Countries") +
+  scale_color_manual(values = c("lightgreen", "darkgreen", "blue", "purple"),
+                     name = "How many \nyears studied?") +
+  scale_shape_manual(values = c(16, 17, 18),
+                     name = "Variable")  +
+  theme_minimal() + 
+  guides(colour = guide_legend(override.aes = list(size=6))) +
+  theme(legend.text  = element_text(size = 16),
+        legend.title = element_text(size = 20))
+sitemap_years
+
+ggsave("~/GitHubRepos/CareyLabVT/Powell/Systematic/Plots/sitemap.jpg", plot = sitemap, height = 4, width = 6.5, units = "in")
+
+ggsave("~/GitHubRepos/CareyLabVT/Powell/Systematic/Plots/sitemap_years.jpg", plot = sitemap_years, height = 4, width = 6.5, units = "in")
+
+ggsave("~/GitHubRepos/CareyLabVT/Powell/Systematic/Plots/sitemapposter.jpg", plot = sitemap_trophic, height = 4, width = 10, units = "in")
+```
+
+## Prop Water Level
+
+```{r max depth and proportion water level}
+prop_dl <- data |>
+  mutate(obs_maxdepth = ifelse(obs_maxdepth == "", NA, obs_maxdepth)) |> 
+  mutate(usedepth = ifelse(is.na(obs_maxdepth), fullpond_maxdepth, obs_maxdepth)) |> 
+  #select(c("obs_maxdepth", "fullpond_maxdepth", "usedepth")) |> 
+  mutate(elev_decrease_max = as.numeric(elev_decrease_max)) |> 
+  mutate(usedepth = as.numeric(usedepth)) |> 
+  mutate(prop_1delta_wl_decrease = ifelse(is.na(elev_increase_max), elev_decrease_max/usedepth, NA)) |> 
+  mutate(prop_alldelta_wl_decrease = elev_decrease_max/usedepth) |> 
+  mutate(prop_alldelta_wl_decrease = ifelse(prop_alldelta_wl_decrease > 0, prop_alldelta_wl_decrease* -1, prop_alldelta_wl_decrease)) |> 
+  mutate(prop_1delta_wl_decrease = ifelse(prop_1delta_wl_decrease > 0, prop_1delta_wl_decrease* -1, prop_1delta_wl_decrease)) |>
+  mutate(prop_alldelta_wl_increase = elev_increase_max/usedepth) |> 
+  mutate(prop_1delta_wl_increase = elev_increase_max/usedepth) |> 
+  #select(c("obs_maxdepth", "fullpond_maxdepth", "usedepth", "prop_1delta_wl_decrease", "prop_alldelta_wl_decrease", "elev_decrease_max", "elev_increase_max", "prop_alldelta_wl_increase", "prop_1delta_wl_increase"))
+  mutate(prop_delta_wl = ifelse(is.na(prop_alldelta_wl_decrease), prop_alldelta_wl_increase, prop_alldelta_wl_decrease)) |> 
+  mutate(prop_delta_wl_priorityincrease = ifelse(is.na(prop_alldelta_wl_increase), prop_alldelta_wl_decrease, prop_alldelta_wl_increase))
+
+boxplotdata2 <- prop_dl %>% 
+  #mutate(prop_delta_wl = delta_wl_direction/depth_max_m) %>% 
+    mutate(phyto_binary_increase = ifelse(increase_phyto_response == "No significant response", 0, 
+                                ifelse(increase_phyto_response == "Decrease in phytoplankton", 0, 
+                                ifelse(increase_phyto_response == "Increase in phytoplankton", 1, NA)))) %>% 
+  mutate(phyto_binary_decrease = ifelse(decrease_phyto_response == "No significant response", 0, 
+                                ifelse(decrease_phyto_response == "Decrease in phytoplankton", 0, 
+                                ifelse(decrease_phyto_response == "Increase in phytoplankton", 1, NA)))) %>%
+  # mutate(combined_phyto_response_text = decrease_phyto_response %>% 
+  #          is.na() %>% 
+  #          ifelse(increase_phyto_response, decrease_phyto_response)) %>% 
+    mutate(combined_phyto_response_binary = case_when(
+  is.na(phyto_binary_decrease) & prop_delta_wl < 0 ~ NA_real_,
+  is.na(phyto_binary_decrease) ~ phyto_binary_increase,
+  TRUE ~ phyto_binary_decrease
+)) |> 
+    mutate(combined_phyto_response_binary_increasepriority = case_when(
+ prop_delta_wl_priorityincrease < 0 ~ phyto_binary_decrease,
+  is.na(phyto_binary_increase) & prop_delta_wl_priorityincrease > 0 ~ phyto_binary_increase,
+  TRUE ~ phyto_binary_increase
+)) |> 
+    #mutate(combined_phyto_response_binary = ifelse(is.na(phyto_binary_decrease), phyto_binary_increase, phyto_binary_decrease)) %>% 
+    mutate(cyano_binary_increase = ifelse(increase_cyano_response == "No significant response", 0, 
+                                ifelse(increase_cyano_response == "Decrease in cyanobacteria", 0, 
+                                ifelse(increase_cyano_response == "Increase in cyanobacteria", 1, NA)))) %>% 
+  mutate(cyano_binary_decrease = ifelse(decrease_cyano_response == "No significant response", 0, 
+                                ifelse(decrease_cyano_response == "Decrease in cyanobacteria", 0, 
+                                ifelse(decrease_cyano_response == "Increase in cyanobacteria", 1, NA)))) %>%
+  # mutate(combined_phyto_response_text = decrease_phyto_response %>% 
+  #          is.na() %>% 
+  #          ifelse(increase_phyto_response, decrease_phyto_response)) %>% 
+    #mutate(combined_cyano_response_binary = ifelse(is.na(cyano_binary_decrease), cyano_binary_increase, cyano_binary_decrease)) %>% 
+  mutate(cyano_response_wl_up = ifelse(increase_cyano_response == "No significant response", "Not significant", 
+                                ifelse(increase_cyano_response == "Decrease in cyanobacteria", "Decrease ", 
+                                ifelse(increase_cyano_response == "Increase in cyanobacteria", "Increase ", 
+                               ifelse(increase_cyano_response == "shift", "Shift", NA))))) %>% 
+    mutate(cyano_response_wl_down = ifelse(decrease_cyano_response == "No significant response", "Not significant", 
+                                ifelse(decrease_cyano_response == "Decrease in cyanobacteria", "Decrease", 
+                                ifelse(decrease_cyano_response == "Increase in cyanobacteria", "Increase", 
+                               ifelse(decrease_cyano_response == "shift", "Shift to \n Cyanobacteria \n dominated\n community", NA))))) %>% 
+  mutate(combined_cyano_response_binary = case_when(
+  is.na(cyano_binary_decrease) & prop_delta_wl < 0 ~ NA_real_,
+  is.na(cyano_binary_decrease) ~ cyano_binary_increase,
+  TRUE ~ cyano_binary_decrease
+)) |>
+       mutate(combined_cyano_response_binary_increasepriority = case_when(
+  prop_delta_wl_priorityincrease < 0 ~ cyano_binary_decrease,
+  prop_delta_wl_priorityincrease > 0 ~ cyano_binary_increase,
+  TRUE ~ cyano_binary_increase
+)) |> 
+   mutate(combined_cyano_response = ifelse(is.na(decrease_cyano_response), cyano_response_wl_up, decrease_cyano_response)) %>% 
+  mutate(combined_cyano_response_increasepriority = ifelse(is.na(cyano_response_wl_up), decrease_cyano_response, cyano_response_wl_up)) %>% 
+    mutate(phyto_response_wl_up = ifelse(increase_phyto_response == "No significant response", "Not significant", 
+                                ifelse(increase_phyto_response == "Decrease in phytoplankton", "Decrease ", 
+                                ifelse(increase_phyto_response == "Increase in phytoplankton", "Increase ", 
+                               ifelse(increase_phyto_response == "shift", "Shift", NA))))) %>% 
+    mutate(phyto_response_wl_down = ifelse(decrease_phyto_response == "No significant response", "Not significant", 
+                                ifelse(decrease_phyto_response == "Decrease in phytoplankton", "Decrease", 
+                                ifelse(decrease_phyto_response == "Increase in phytoplankton", "Increase", 
+                               ifelse(decrease_phyto_response == "shift", "Shift to\n Cyanobacteria\n dominated\n community", NA))))) %>% 
+  mutate(combined_phyto_response = ifelse(is.na(phyto_response_wl_down), phyto_response_wl_up, phyto_response_wl_down)) |> 
+  mutate(combined_phyto_response_increasepriority = ifelse(is.na(phyto_response_wl_up), phyto_response_wl_down, phyto_response_wl_up))
+
+```
+
+## Set up logistic regression
+
+```{r}
+cyanodecreasedata <- boxplotdata2 %>% 
+  select(prop_alldelta_wl_decrease, prop_alldelta_wl_increase, prop_delta_wl_priorityincrease, combined_cyano_response_increasepriority, combined_cyano_response_binary_increasepriority, name_yr) %>% 
+  filter(!is.na(prop_delta_wl_priorityincrease)) %>%
+  filter(!is.na(combined_cyano_response_binary_increasepriority)) %>% 
+  filter(prop_alldelta_wl_decrease<0) %>% 
+  rename(response_binaryincrease = combined_cyano_response_binary_increasepriority, 
+         response_increase = combined_cyano_response_increasepriority) %>% 
+  mutate(type = "cyano")
+
+cyanoincreasedata <- boxplotdata2 %>% 
+  select(prop_alldelta_wl_decrease, prop_alldelta_wl_increase, prop_delta_wl_priorityincrease, combined_cyano_response_increasepriority, combined_cyano_response_binary_increasepriority, name_yr) %>% 
+  filter(!is.na(prop_delta_wl_priorityincrease)) %>%
+  filter(!is.na(combined_cyano_response_binary_increasepriority)) %>% 
+  filter(prop_alldelta_wl_increase>0) %>% 
+  rename(response_binaryincrease = combined_cyano_response_binary_increasepriority, 
+         response_increase = combined_cyano_response_increasepriority) %>% 
+  mutate(type = "cyano")
+
+phytoincreasedata <- boxplotdata2 %>% 
+  select(prop_alldelta_wl_decrease, prop_alldelta_wl_increase, prop_delta_wl_priorityincrease, combined_phyto_response_increasepriority, combined_phyto_response_binary_increasepriority, name_yr) %>% 
+  filter(!is.na(prop_delta_wl_priorityincrease)) %>% 
+  filter(!is.na(combined_phyto_response_binary_increasepriority)) %>% 
+  filter(prop_alldelta_wl_increase>0) %>% 
+  rename(response_binaryincrease = combined_phyto_response_binary_increasepriority, 
+         response_increase = combined_phyto_response_increasepriority) %>% 
+  mutate(type = "phyto")
+
+phytodecreasedata <- boxplotdata2 %>% 
+  select(prop_alldelta_wl_decrease, prop_alldelta_wl_increase, prop_delta_wl_priorityincrease, combined_phyto_response_increasepriority, combined_phyto_response_binary_increasepriority, name_yr) %>% 
+  filter(!is.na(prop_delta_wl_priorityincrease)) %>% 
+  filter(!is.na(combined_phyto_response_binary_increasepriority)) %>% 
+  filter(prop_alldelta_wl_decrease<0) %>% 
+  rename(response_binaryincrease = combined_phyto_response_binary_increasepriority, 
+         response_increase = combined_phyto_response_increasepriority) %>% 
+  mutate(type = "phyto")
+  
+cyanodata <- boxplotdata2 %>% 
+  select(prop_delta_wl_priorityincrease, combined_cyano_response_increasepriority, combined_cyano_response_binary_increasepriority, name_yr, trophic_status_reduced) %>% 
+  filter(!is.na(prop_delta_wl_priorityincrease)) %>%
+  filter(!is.na(combined_cyano_response_binary_increasepriority)) %>% 
+  # filter(prop_delta_wl<0) %>% 
+  rename(response_binary = combined_cyano_response_binary_increasepriority, 
+         response = combined_cyano_response_increasepriority) %>% 
+  mutate(type = "cyano") |> 
+  mutate(wl_priority = "increase")
+
+phytodata <- boxplotdata2 %>% 
+  select(prop_delta_wl_priorityincrease, combined_phyto_response_increasepriority, combined_phyto_response_binary_increasepriority, name_yr, trophic_status_reduced) %>% 
+  filter(!is.na(prop_delta_wl_priorityincrease)) %>% 
+  filter(!is.na(combined_phyto_response_binary_increasepriority)) %>% 
+  # filter(prop_delta_wl<0) %>% 
+  rename(response_binary = combined_phyto_response_binary_increasepriority, 
+         response = combined_phyto_response_increasepriority) %>% 
+  mutate(type = "phyto")|> 
+  mutate(wl_priority = "increase")
+# logregdata <- rbind(cyanoincreasedata, cyanodecreasedata, phytoincreasedata, phytodecreasedata)
+logregdata_increase <- rbind(cyanodata, phytodata)
+#"#7A524B","#3C7F29","#8DBAE9"
+
+cyanodecreasedata <- boxplotdata2 %>% 
+  select(prop_alldelta_wl_decrease, prop_alldelta_wl_increase, prop_delta_wl, combined_cyano_response, combined_cyano_response_binary, name_yr) %>% 
+  filter(!is.na(prop_delta_wl)) %>%
+  filter(!is.na(combined_cyano_response_binary)) %>% 
+  filter(prop_alldelta_wl_decrease<0) %>% 
+  rename(response_binary = combined_cyano_response_binary, 
+         response = combined_cyano_response) %>% 
+  mutate(type = "cyano")
+
+cyanoincreasedata <- boxplotdata2 %>% 
+  select(prop_alldelta_wl_decrease, prop_alldelta_wl_increase, prop_delta_wl, combined_cyano_response, combined_cyano_response_binary, name_yr) %>% 
+  filter(!is.na(prop_delta_wl)) %>%
+  filter(!is.na(combined_cyano_response_binary)) %>% 
+  filter(prop_alldelta_wl_increase>0) %>% 
+  rename(response_binary = combined_cyano_response_binary, 
+         response = combined_cyano_response) %>% 
+  mutate(type = "cyano")
+
+phytoincreasedata <- boxplotdata2 %>% 
+  select(prop_alldelta_wl_decrease, prop_alldelta_wl_increase, prop_delta_wl, combined_phyto_response, combined_phyto_response_binary, name_yr) %>% 
+  filter(!is.na(prop_delta_wl)) %>% 
+  filter(!is.na(combined_phyto_response_binary)) %>% 
+  filter(prop_alldelta_wl_increase>0) %>% 
+  rename(response_binary = combined_phyto_response_binary, 
+         response = combined_phyto_response) %>% 
+  mutate(type = "phyto")
+
+phytodecreasedata <- boxplotdata2 %>% 
+  select(prop_alldelta_wl_decrease, prop_alldelta_wl_increase, prop_delta_wl, combined_phyto_response, combined_phyto_response_binary, name_yr, trophic_status_reduced) %>% 
+  filter(!is.na(prop_delta_wl)) %>% 
+  filter(!is.na(combined_phyto_response_binary)) %>% 
+  filter(prop_alldelta_wl_decrease<0) %>% 
+  rename(response_binary = combined_phyto_response_binary, 
+         response = combined_phyto_response) %>% 
+  mutate(type = "phyto")
+  
+cyanodata <- boxplotdata2 %>% 
+  select(prop_delta_wl, combined_cyano_response, combined_cyano_response_binary, name_yr, trophic_status_reduced) %>% 
+  filter(!is.na(prop_delta_wl)) %>%
+  filter(!is.na(combined_cyano_response_binary)) %>% 
+  # filter(prop_delta_wl<0) %>% 
+  rename(response_binary = combined_cyano_response_binary, 
+         response = combined_cyano_response) %>% 
+  mutate(type = "cyano") |> 
+  mutate(wl_priority = "decrease")
+
+phytodata <- boxplotdata2 %>% 
+  select(prop_delta_wl, combined_phyto_response, combined_phyto_response_binary, name_yr, trophic_status_reduced) %>% 
+  filter(!is.na(prop_delta_wl)) %>% 
+  filter(!is.na(combined_phyto_response_binary)) %>% 
+  # filter(prop_delta_wl<0) %>% 
+  rename(response_binary = combined_phyto_response_binary, 
+         response = combined_phyto_response) %>% 
+  mutate(type = "phyto") |> 
+  mutate(wl_priority = "decrease")
+
+# logregdata <- rbind(cyanoincreasedata, cyanodecreasedata, phytoincreasedata, phytodecreasedata)
+logregdata_decrease <- rbind(cyanodata, phytodata)
+logregdata <- logregdata_decrease
+#"#7A524B","#3C7F29","#8DBAE9"
+
+```
+
+## Logreg: combined
+```{r}
+logregdata_increase1 <- logregdata_increase |>
+  rename(prop_delta_wl = prop_delta_wl_priorityincrease)
+
+new_all <- bind_rows(logregdata_decrease, logregdata_increase1) |>
+  select(-c(wl_priority)) |>
+  unique()
+
+all <- new_all %>% ggplot(aes(x = prop_delta_wl, y = response_binary, color = as.factor(type), shape = as.factor(type))) +
+  scale_color_manual(values = c("#4dd0e1", "#99bbab"), name = "")+
+  scale_shape_manual(values = c(8, 20)) +
+  geom_point(size = 3) +
+  geom_smooth(method = "glm",
+              method.args = list(family = "binomial"),
+              se = FALSE, linewidth = 3) +
+  #geom_jitter()+
+ ylab("Response to changes in water level") +
+  xlab("Proportion water level change") +
+  #ggtitle("Combined increases and decreases") + 
+  theme_bw() +
+  theme(axis.text.x = element_text(hjust = 1, size = 10),
+        axis.title.y=element_text(angle=90, vjust = .5, size = 12),
+        legend.title=element_blank())
+all
+#117733
+#factor(trophic_status_reduced, c("oligotrophic", "mesotrophic", "eutrophic", "hypereutrophic"))
+logreg_phyto <- new_all %>% 
+  filter(type == "phyto") |> 
+  # ggplot(aes(x = prop_delta_wl, y = response_binary, color = as.factor(type), shape = as.factor(type))) +
+  ggplot(aes(x = prop_delta_wl, y = response_binary, shape = as.factor(type))) +
+  scale_color_manual(values = c("#3355DB", "#FFC51E", "#B1C3A2", "#549C79", "gray"), name = "")+
+  scale_shape_manual(values = c(20, 10, 11, 12, 13)) +
+  # geom_point(size = 10, alpha = 0.5, aes(color = as.factor(trophic_status_reduced))) +
+    geom_point(
+    aes(
+      color = as.factor(factor(trophic_status_reduced, c("oligotrophic", "mesotrophic", "eutrophic", "hypereutrophic", "not reported"))),
+      shape = as.factor(type),
+      text = paste(
+        "Name / Year:", name_yr,
+        "<br>Trophic status:", trophic_status_reduced,
+        "<br>Δ WL:", prop_delta_wl,
+        "<br>Response:", response_binary
+      )
+    ),
+    size = 14,
+    alpha = 0.75
+  ) + 
+  geom_smooth(method = "glm",
+              method.args = list(family = "binomial"),
+              se = FALSE, linewidth = 6, color = "black") +
+  #geom_jitter()+
+ # ylab("Phytoplankton response to changes in water level") +
+ #  xlab("Proportion water level change") +
+   ylab("") +
+  xlab("") +
+  #ggtitle("Combined increases and decreases") + 
+  theme_bw() +
+  theme(axis.text.x = element_text(hjust = 0.5, size = 20),
+        axis.text.y = element_text(hjust = 1, size = 20),
+        axis.title.y=element_text(angle=90, hjust = 1, size = 28),
+        axis.title.x=element_text(vjust = 1, size = 28),
+        legend.text  = element_text(size = 28),
+        legend.title=element_blank())
+
+plotly_p <- ggplotly(logreg_phyto)
+
+plotly_p # I have this as a plotly to be able to see exactly what's going into this for now. Useful, but can probably be removed for publishing
+logreg_phyto
+
+logregdata_phyto <- new_all %>% subset(type == "phyto")
+logregdata_cyano <- new_all %>% subset(type == "cyano")
+
+logregform_phyto <-  glm(formula=response_binary ~ prop_delta_wl, data=logregdata_phyto, family=binomial)
+results <- summary(logregform_phyto)
+exp(coef(results))
+
+logregform_cyano <-  glm(formula=response_binary ~ prop_delta_wl, data=logregdata_cyano, family=binomial)
+summary(logregform_cyano)
+
+ggsave("~/GitHubRepos/CareyLabVT/Powell/Systematic/Plots/logregposter.jpg", plot = logreg_phyto, height = 9.5, width = 20, units = "in")
+
+ggsave("~/GitHubRepos/CareyLabVT/Powell/Systematic/Plots/logreg.jpg", plot = all, height = 4, width = 8, units = "in")
+
+```
+
+## Set up and run X2
+
+```{r}
+dat <- boxplotdata2 %>% 
+    mutate(depth_m = ifelse(is.na(fullpond_maxdepth), obs_maxdepth, fullpond_maxdepth),
+           depth_m = as.numeric(depth_m)) |> 
+  select(cov_num, res_name, trophic_status_combined, tp_ugL, decrease_phyto_response, increase_phyto_response,
+         decrease_cyano_response, increase_cyano_response, chla_ugL, combined_phyto_response, combined_cyano_response, name_yr, depth_m) %>%
+  mutate(increase_phyto_response = ifelse(increase_phyto_response == "Not measured"|increase_phyto_response == ""|(grepl("Other", increase_phyto_response)), NA, increase_phyto_response)) |>
+    mutate(decrease_phyto_response = ifelse(decrease_phyto_response == "Not measured"|decrease_phyto_response == ""|(grepl("Other", decrease_phyto_response)), NA, decrease_phyto_response)) |>
+   mutate(increase_cyano_response = ifelse(increase_cyano_response == "Not measured"|increase_cyano_response == ""|(grepl("Other", increase_cyano_response)), NA, increase_cyano_response)) |>
+   mutate(decrease_cyano_response = ifelse(decrease_cyano_response == "Not measured"|decrease_cyano_response == ""|(grepl("Other", decrease_cyano_response)), NA, decrease_cyano_response)) |>
+  filter(!(is.na(decrease_phyto_response) & is.na(increase_phyto_response) & is.na(decrease_cyano_response) & is.na(increase_cyano_response))) %>%
+  mutate(increase_decrease_mosaic = ifelse(((!is.na(decrease_phyto_response) | !is.na(decrease_cyano_response)) & (!is.na(increase_phyto_response) | !is.na(increase_cyano_response))),"Both",
+                                           ifelse((!is.na(decrease_phyto_response) | !is.na(decrease_cyano_response)),"Decrease",
+                                                  ifelse((!is.na(increase_phyto_response) | !is.na(increase_cyano_response)),"Increase", NA)))) 
+
+fluctuation_studies_keep_increase <- dat %>%
+  filter(increase_decrease_mosaic == "Both") %>%
+  mutate(increase_decrease_mosaic = "Increase",
+         decrease_phyto_response = NA,
+         decrease_cyano_response = NA) 
+
+fluctuation_studies_keep_decrease <- dat %>%
+  filter(increase_decrease_mosaic == "Both") %>%
+  mutate(increase_decrease_mosaic = "Decrease",
+         increase_phyto_response = NA,
+         increase_cyano_response = NA) 
+
+dat_no_fluctuation_studies <- dat %>%
+  filter(!increase_decrease_mosaic == "Both")
+
+dat2 <- bind_rows(dat_no_fluctuation_studies, fluctuation_studies_keep_increase) %>%
+  bind_rows(., fluctuation_studies_keep_decrease) %>%
+  mutate(decrease_phyto_response = ifelse(is.na(decrease_phyto_response),"not reported",decrease_phyto_response),
+         increase_phyto_response = ifelse(is.na(increase_phyto_response),"not reported",increase_phyto_response),
+         decrease_cyano_response = ifelse(is.na(decrease_cyano_response),"not reported",decrease_cyano_response),
+         increase_cyano_response = ifelse(is.na(increase_cyano_response),"not reported",increase_cyano_response)) %>%
+  mutate(trophic_status_mosaic = ifelse((grepl("oligo",trophic_status_combined) | grepl("meso",trophic_status_combined)),"oligo/mesotrophic",
+                                        ifelse(grepl("eu", trophic_status_combined),"eu/hypereutrophic","not reported")),
+         increase_phyto = ifelse((increase_decrease_mosaic == "Increase" & increase_phyto_response == "Increase in phytoplankton"),"yes",
+                                 ifelse(increase_decrease_mosaic == "Increase" & increase_phyto_response == "not reported","not reported",
+                                        ifelse(increase_decrease_mosaic == "Decrease" & decrease_phyto_response == "Increase in phytoplankton","yes",
+                                               ifelse(increase_decrease_mosaic == "Decrease" & decrease_phyto_response == "not reported","not reported","no")))),
+         increase_cyano = ifelse((increase_decrease_mosaic == "Increase" & increase_cyano_response == "Increase in cyanobacteria"),"yes",
+                                 ifelse(increase_decrease_mosaic == "Increase" & increase_cyano_response == "not reported","not reported",
+                                        ifelse(increase_decrease_mosaic == "Decrease" & decrease_cyano_response == "Increase in cyanobacteria","yes",
+                                               ifelse(increase_decrease_mosaic == "Decrease" & decrease_cyano_response == "not reported","not reported","no"))))) %>%
+  select(cov_num, name_yr, depth_m, res_name, increase_decrease_mosaic, trophic_status_mosaic, increase_phyto, increase_cyano) %>%
+  mutate(trophic_status_mosaic = factor(trophic_status_mosaic, levels = c("not reported","eu/hypereutrophic","oligo/mesotrophic")),
+         increase_phyto = factor(increase_phyto, levels = c("yes","no","not reported")),
+         increase_cyano = factor(increase_cyano, levels = c("yes","no","not reported"))) 
+
+dat_phyto1 <- dat2 %>%
+  filter(!increase_phyto == "not reported") %>%
+  select(trophic_status_mosaic, increase_decrease_mosaic, increase_phyto) %>%
+  mutate(x_axis_barplot = paste(increase_decrease_mosaic, increase_phyto, sep = "_")) %>%
+  group_by(x_axis_barplot, trophic_status_mosaic) %>%
+  summarise(count = n()) |>
+  mutate(response.count = sum(count),
+         ts.prop = count/sum(count)) |>
+  ungroup() %>%
+  mutate(response.prop = response.count/sum(count)) %>%
+  ungroup() %>%
+  separate(x_axis_barplot,c("increase_decrease_mosaic","increase_phyto"), remove = FALSE) %>%
+  mutate(trophic_status_mosaic = factor(trophic_status_mosaic, levels = c("oligo/mesotrophic","eu/hypereutrophic","not reported")))
+
+dat_phyto1 <- dat2 %>%
+  filter(!increase_phyto == "not reported") %>%
+  select(trophic_status_mosaic, increase_decrease_mosaic, increase_phyto) %>%
+  mutate(x_axis_barplot = paste(increase_decrease_mosaic, increase_phyto, sep = "_")) %>%
+  group_by(x_axis_barplot, trophic_status_mosaic) %>%
+  summarise(count = n(), .groups = "drop") %>%
+
+  # Ensure all combinations of x_axis_barplot and trophic_status_mosaic exist
+  complete(
+    x_axis_barplot,
+    trophic_status_mosaic,
+    fill = list(count = 0)
+  ) %>%
+
+  # Recompute decomposed vars after completing
+  separate(x_axis_barplot, c("increase_decrease_mosaic", "increase_phyto"), remove = FALSE) %>%
+  group_by(x_axis_barplot) %>%
+  mutate(response.count = sum(count),
+         ts.prop = count / sum(count)) %>%
+  ungroup() %>%
+  mutate(response.prop = response.count / sum(count)) %>%
+  mutate(
+    trophic_status_mosaic = factor(
+      trophic_status_mosaic,
+      levels = c("oligo/mesotrophic", "eu/hypereutrophic", "not reported")
+    )
+  )
+
+
+dat_phyto_new <- dat2 %>%
+  filter(!increase_phyto == "not reported") %>%
+  select(increase_decrease_mosaic, increase_phyto) %>%
+  mutate(x_axis_barplot = paste(increase_decrease_mosaic, increase_phyto, sep = "_")) %>%
+  group_by(x_axis_barplot, increase_decrease_mosaic) %>%
+  summarise(count = n()) |>
+  ungroup() |> 
+  group_by(increase_decrease_mosaic) |> 
+  mutate(response.count = sum(count),
+         ts.prop = count/sum(count)) |>
+  ungroup() %>%
+  mutate(response.prop = count/response.count) %>%
+  ungroup() %>%
+  separate(x_axis_barplot, c("increase_decrease_mosaic","increase_phyto"), remove = FALSE)
+
+dat_cyano_new <- dat2 %>%
+  filter(!increase_cyano == "not reported") %>%
+  select(increase_decrease_mosaic, increase_cyano) %>%
+  mutate(x_axis_barplot = paste(increase_decrease_mosaic, increase_cyano, sep = "_")) %>%
+  group_by(x_axis_barplot, increase_decrease_mosaic) %>%
+  summarise(count = n()) |>
+  ungroup() |> 
+  group_by(increase_decrease_mosaic) |> 
+  mutate(response.count = sum(count),
+         ts.prop = count/sum(count)) |>
+  ungroup() %>%
+  mutate(response.prop = count/response.count) %>%
+  ungroup() %>%
+  separate(x_axis_barplot, c("increase_decrease_mosaic","increase_cyano"), remove = FALSE)
+
+#for datphytonew:
+# New facet label names for water level/response variable
+wl.labs <- c("WL decrease","WL increase")
+names(wl.labs) <- unique(dat_phyto_new$increase_decrease_mosaic)
+response.labs <- c("no phyto \n increase", "phyto \n increase", "no phyto \n increase", "phyto \n increase") 
+
+# Calculate bar positions
+w <- c((dat_phyto_new$response.prop))
+pos <- data.frame(pos = 0.5 * (cumsum(w) + cumsum(c(0, w[-length(w)]))),
+                  x_axis_barplot = unique(dat_phyto_new$x_axis_barplot))
+
+## From Agresti(2007) p.39
+
+# first for phytoplankton
+phyto <- dat2 %>%
+  select(increase_decrease_mosaic, increase_phyto)
+phyto_increase_wl_increase <- phyto %>%
+  filter(increase_decrease_mosaic == "Increase" & increase_phyto == "yes") %>%
+  count(increase_phyto) %>%
+  pull(n)
+phyto_no_increase_wl_increase <- phyto %>%
+  filter(increase_decrease_mosaic == "Increase" & increase_phyto == "no") %>%
+  count(increase_phyto) %>%
+  pull(n)
+phyto_increase_wl_decrease <- phyto %>%
+  filter(increase_decrease_mosaic == "Decrease" & increase_phyto == "yes") %>%
+  count(increase_phyto) %>%
+  pull(n)
+phyto_no_increase_wl_decrease <- phyto %>%
+  filter(increase_decrease_mosaic == "Decrease" & increase_phyto == "no") %>%
+  count(increase_phyto) %>%
+  pull(n)
+
+# Question 1: are there differences in phytoplankton responses to increases vs.
+# decreases in water level?
+M <- as.table(rbind(c(phyto_increase_wl_increase, phyto_increase_wl_decrease), c(phyto_no_increase_wl_increase, phyto_no_increase_wl_decrease)))
+dimnames(M) <- list(phyto_response = c("increase", "decrease or no change"),
+                    water_level = c("increase","decrease"))
+M
+(Xsq <- chisq.test(M))  # Prints test summary
+Xsq$observed   # observed counts (same as M)
+Xsq$expected   # expected counts under the null
+Xsq$residuals  # Pearson residuals
+Xsq$stdres     # standardized residuals
+Xsq$p.value
+
+# Question 2: are there differences in the likelihood of phytoplankton to increase
+# or decrease given an increase in water level?
+M_increase <- M[,1]
+M_increase
+(Xsq <- chisq.test(M_increase))  # Prints test summary
+Xsq$observed   # observed counts (same as M)
+Xsq$expected   # expected counts under the null
+Xsq$residuals  # Pearson residuals
+Xsq$stdres     # standardized residuals
+Xsq$p.value
+
+# Question 3: are there differences in the likelihood of phytoplankton to increase
+# or decrease given a decrease in water level?
+M_decrease <- M[,2]
+M_decrease
+(Xsq <- chisq.test(M_decrease))  # Prints test summary
+Xsq$observed   # observed counts (same as M)
+Xsq$expected   # expected counts under the null
+Xsq$residuals  # Pearson residuals
+Xsq$stdres     # standardized residuals
+Xsq$p.value
+
+# now for cyanobacteria
+cyano <- dat2 %>%
+  select(increase_decrease_mosaic, increase_cyano)
+cyano_increase_wl_increase <- cyano %>%
+  filter(increase_decrease_mosaic == "Increase" & increase_cyano == "yes") %>%
+  count(increase_cyano) %>%
+  pull(n)
+cyano_no_increase_wl_increase <- cyano %>%
+  filter(increase_decrease_mosaic == "Increase" & increase_cyano == "no") %>%
+  count(increase_cyano) %>%
+  pull(n)
+cyano_increase_wl_decrease <- cyano %>%
+  filter(increase_decrease_mosaic == "Decrease" & increase_cyano == "yes") %>%
+  count(increase_cyano) %>%
+  pull(n)
+cyano_no_increase_wl_decrease <- cyano %>%
+  filter(increase_decrease_mosaic == "Decrease" & increase_cyano == "no") %>%
+  count(increase_cyano) %>%
+  pull(n)
+
+# Question 1: are there differences in cyanobacterial responses to increases vs.
+# decreases in water level?
+M <- as.table(rbind(c(cyano_increase_wl_increase, cyano_increase_wl_decrease), c(cyano_no_increase_wl_increase, cyano_no_increase_wl_decrease)))
+dimnames(M) <- list(cyano_response = c("increase", "decrease or no change"),
+                    water_level = c("increase","decrease"))
+M
+f_chisq_test(M)
+(Xsq <- chisq.test(M))  # Prints test summary
+Xsq$observed   # observed counts (same as M)
+Xsq$expected   # expected counts under the null
+Xsq$residuals  # Pearson residuals
+Xsq$stdres     # standardized residuals
+Xsq$p.value
+
+# Question 2: are there differences in the likelihood of cyanobacteria to increase
+# or decrease given an increase in water level?
+M_increase <- M[,1]
+M_increase
+(Xsq <- chisq.test(M_increase))  # Prints test summary
+Xsq$observed   # observed counts (same as M)
+Xsq$expected   # expected counts under the null
+Xsq$residuals  # Pearson residuals
+Xsq$stdres     # standardized residuals
+Xsq$p.value
+
+# Question 3: are there differences in the likelihood of cyanobacteria to increase
+# or decrease given a decrease in water level?
+M_decrease <- M[,2]
+M_decrease
+(Xsq <- chisq.test(M_decrease))  # Prints test summary
+Xsq$observed   # observed counts (same as M)
+Xsq$expected   # expected counts under the null
+Xsq$residuals  # Pearson residuals
+Xsq$stdres     # standardized residuals
+Xsq$p.value
+
+
+```
+
+```{r x2 with three levels instead of 2}
+library(dplyr)
+library(tidyr)
+library(rstatix)
+
+# Create contingency table
+tab_cyano_all <- boxplotdata2 %>%
+  pivot_longer(
+    cols = c(cyano_response_wl_up, cyano_response_wl_down),
+    names_to = "water_direction",
+    values_to = "response"
+  ) %>%
+  mutate(response = gsub(" ", "", response)) %>%
+  filter(!is.na(response)) %>%
+  with(table(water_direction, response))
+
+# Run chi-square test
+# Are there differences in cyanobacterial responses to increases vs. decreases in water level?
+chisq_test(tab_cyano_all)
+f_chisq_test(tab_cyano_all) #Bonferroni - adj. p
+
+tab_cyano_down <- boxplotdata2 %>%
+  mutate(
+    water_direction_final = case_when(
+      !is.na(cyano_response_wl_down) ~ "wl_down",
+      is.na(cyano_response_wl_down) & !is.na(cyano_response_wl_up) ~ "wl_up",
+      TRUE ~ NA_character_
+    ),
+    response_final = case_when(
+      !is.na(cyano_response_wl_down) ~ cyano_response_wl_down,
+      is.na(cyano_response_wl_down) & !is.na(cyano_response_wl_up) ~ cyano_response_wl_up,
+      TRUE ~ NA_character_
+    ),
+    response_final = gsub(" ", "", response_final)
+  ) %>%
+  filter(!is.na(response_final)) %>%
+  count(water_direction_final, response_final)
+
+tab_cyano_down
+
+tab_cyano_down <- xtabs(n ~ water_direction_final + response_final,
+                    data = tab_cyano_down)
+
+chisq_test(tab_cyano_down)
+f_chisq_test(tab_cyano_down)
+fisher.test(tab_cyano_down)
+
+
+tab_cyano_up <- boxplotdata2 %>%
+  mutate(
+    water_direction_final = case_when(
+      !is.na(cyano_response_wl_up) ~ "wl_up",                     # priority
+      is.na(cyano_response_wl_up) & !is.na(cyano_response_wl_down) ~ "wl_down",
+      TRUE ~ NA_character_
+    ),
+    response_final = case_when(
+      !is.na(cyano_response_wl_up) ~ cyano_response_wl_up,        # priority
+      is.na(cyano_response_wl_up) & !is.na(cyano_response_wl_down) ~ cyano_response_wl_down,
+      TRUE ~ NA_character_
+    ),
+    response_final = gsub(" ", "", response_final)
+  ) %>%
+  filter(!is.na(response_final)) %>%
+  count(water_direction_final, response_final)
+
+
+tab_cyano_up <- xtabs(n ~ water_direction_final + response_final,
+                    data = tab_cyano_up)
+chi_cyano_up <- chisq.test(tab_cyano_up)
+f_chisq_test(tab_cyano_up)
+
+
+# Create contingency table
+tab_phyto_all <- boxplotdata2 %>%
+  pivot_longer(
+    cols = c(phyto_response_wl_up, phyto_response_wl_down),
+    names_to = "water_direction",
+    values_to = "response"
+  ) %>%
+  mutate(response = gsub(" ", "", response)) %>%
+  filter(!is.na(response)) %>%
+  with(table(water_direction, response))
+
+# Run chi-square test
+# Are there differences in cyanobacterial responses to increases vs. decreases in water level?
+chisq_test(tab_phyto_all)
+f_chisq_test(tab_phyto_all) #Bonferroni - adj. p
+
+#wl decrease priority
+tab_phyto <- boxplotdata2 %>%
+  mutate(
+    water_direction_final = case_when(
+      !is.na(phyto_response_wl_down) ~ "wl_down",
+      is.na(phyto_response_wl_down) & !is.na(phyto_response_wl_up) ~ "wl_up",
+      TRUE ~ NA_character_
+    ),
+    response_final = case_when(
+      !is.na(phyto_response_wl_down) ~ phyto_response_wl_down,
+      is.na(phyto_response_wl_down) & !is.na(phyto_response_wl_up) ~ phyto_response_wl_up,
+      TRUE ~ NA_character_
+    ),
+    response_final = gsub(" ", "", response_final)
+  ) %>%
+  filter(!is.na(response_final)) %>%
+  count(water_direction_final, response_final)
+tab_phyto
+tab_phyto_decrease <- xtabs(n ~ water_direction_final + response_final,
+                    data = tab_phyto)
+tab_phyto_decrease
+
+chisq.test(tab_phyto_decrease)
+f_chisq_test(tab_phyto_decrease)
+
+fisher.test(tab_cyano_down)
+fisher.test(tab_cyano_up)
+fisher.test(tab_phyto_decrease)
+fisher.test(phyto_increase_chi)
+
+tab_phyto_increase <- boxplotdata2 %>%
+  mutate(
+    water_direction_final = case_when(
+      !is.na(phyto_response_wl_up) ~ "wl_up",                        # priority to wl_up
+      is.na(phyto_response_wl_up) & !is.na(phyto_response_wl_down) ~ "wl_down",
+      TRUE ~ NA_character_
+    ),
+    response_final = case_when(
+      !is.na(phyto_response_wl_up) ~ phyto_response_wl_up,           # priority to wl_up
+      is.na(phyto_response_wl_up) & !is.na(phyto_response_wl_down) ~ phyto_response_wl_down,
+      TRUE ~ NA_character_
+    ),
+    response_final = gsub(" ", "", response_final)
+  ) %>%
+  filter(!is.na(response_final)) %>%
+  count(water_direction_final, response_final)
+tab_phyto_increase
+phyto_increase_chi <- xtabs(n ~ water_direction_final + response_final,
+                    data = tab_phyto_increase)
+f_chisq_test(phyto_increase_chi)
+
+cyano_chi <- ggplot(df_plot_cyano, aes(x = Var1, y = Freq, fill = Var2)) +
+  geom_bar(stat = "identity", position = "fill") +
+     geom_text(aes(label = Freq),
+            position = position_fill(vjust = 0.5), 
+            color = "black", 
+            size = 6) +
+  labs(x = "",
+       y = "Proportion",
+       fill = "Response",
+       title = "Cyanobacteria Response by Water Level Direction") +
+ scale_fill_manual(
+  values = c("#b2ebf2", "#4dd0e1", "#e0e0e0"),   # 3 colors
+  name = "Did \ncyanobacteria\nincrease or \ndecrease?",
+  labels = c("Decrease", "Increase", "Not Significant")) +
+  theme_bw() + 
+    theme(axis.text.x = element_text(hjust = 0.5, size = 12),
+        #axis.text.x = element_blank(),
+        axis.text.y = element_text(hjust = 1, size = 12),
+        axis.title.y=element_text(angle=90, vjust = 0.5, size = 12),
+        axis.title.x=element_text(vjust = 1, size = 12),
+        #legend.text  = element_blank(),
+        legend.title=element_text(size = 12), 
+        legend.key.height = unit(1, 'cm'),
+        legend.key.width = unit(1, 'cm')) 
+
+df_plot_phyto <- as.data.frame(tab_phyto)
+
+df_plot_phyto$Var1 <- factor(df_plot_phyto$Var1,
+                       levels = c("phyto_response_wl_down",
+                                  "phyto_response_wl_up"),
+                       labels = c("Water Level Decrease",
+                                  "Water Level Increase"))
+
+
+phyto_chi <- ggplot(df_plot_phyto, aes(x = Var1, y = Freq, fill = Var2)) +
+  geom_bar(stat = "identity", position = "fill") +
+     geom_text(aes(label = Freq),
+            position = position_fill(vjust = 0.5), 
+            color = "black", 
+            size = 6) +
+  labs(x = "",
+       y = "Proportion",
+       fill = "Response",
+       title = "Phytoplankton Response by Water Level Direction") +
+  scale_fill_manual(values = c("#ddefcd", "#99bbab", "#e0e0e0"), 
+                    name = "Did \nphytoplankton\nincrease or \ndecrease?",
+  labels = c("Decrease", "Increase", "Not Significant")) +
+  theme_bw() + 
+    theme(axis.text.x = element_text(hjust = 0.5, size = 12),
+        #axis.text.x = element_blank(),
+        axis.text.y = element_text(hjust = 1, size = 12),
+        axis.title.y=element_text(angle=90, vjust = 0.5, size = 12),
+        axis.title.x=element_text(vjust = 1, size = 12),
+        #legend.text  = element_blank(),
+        legend.title=element_text(size = 12), 
+        legend.key.height = unit(1, 'cm'),
+        legend.key.width = unit(1, 'cm')) 
+
+chi <- phyto_chi / cyano_chi #+ plot_annotation(title = "Chi-Square") 
+
+chi
+
+ggsave("~/GitHubRepos/CareyLabVT/Powell/Systematic/Plots/chi.jpg", plot = chi, height = 5, width = 6.5, units = "in")
+
+```
+
+
+## X2 plots
+
+Possible Colors for chi-sq plots: "#8fc7c3", \# cyan-teal version of #99bbab "#d9f1ec" "#4dd0e1", "#b2ebf2" "#ddefcd" "#05A3CA", "#5dce97", "#608687", "#99bbab", "#ddefcd", "#80407c", "#45Cc80", "#a2eafc", "#99abbb""#9d99bb", "#cfcdef" "#99b3c8", \# blue version of #99bbab "#dde7f2") c("#8fb3d9", "#d6e4f5")
+```{r}
+# "#8fc7c3", 
+# # cyan-teal version of 
+# "#99bbab" "#d9f1ec" "#4dd0e1", "#b2ebf2" "#ddefcd" "#05A3CA", "#5dce97", "#608687", "#99bbab", "#ddefcd", "#80407c", "#45Cc80", "#a2eafc", "#99abbb""#9d99bb", "#cfcdef" "#99b3c8", \# blue version of #99bbab "#dde7f2") c("#8fb3d9", "#d6e4f5")
+```
+
+
+
+```{r barplots for chisq}
+# #stacked barplots for chisq
+# dat_phyto_new1 <- dat_phyto_new |> 
+#   mutate(increase_decrease_mosaic = case_when(increase_decrease_mosaic == "Decrease" ~ "Decrease in Water Level", 
+#                                               increase_decrease_mosaic == "Increase" ~ "Increase in Water Level"))
+# 
+# dat_cyano_new1 <- dat_cyano_new |> 
+#   mutate(increase_decrease_mosaic = case_when(increase_decrease_mosaic == "Decrease" ~ "Decrease in Water Level", 
+#                                               increase_decrease_mosaic == "Increase" ~ "Increase in Water Level"))
+#  
+# 
+# 
+# phyto_chi <-  ggplot(dat_phyto_new1, aes(x = increase_decrease_mosaic, y = count, fill = increase_phyto))  +
+#     geom_bar(position="stack", stat="identity") + 
+#     xlab("") + ylab("") + 
+#    geom_text(aes(label = count),
+#             position = position_stack(vjust = 0.5), 
+#             color = "black", 
+#             size = 6) + 
+#   scale_fill_manual(values = c("#ddefcd", "#99bbab"), name = "Did phytoplankton \nincrease?") + 
+#   theme_bw()+
+#   theme(#axis.text.x = element_text(hjust = 0.5, size = 20),
+#         axis.text.x = element_blank(),
+#         axis.text.y = element_text(hjust = 1, size = 12),
+#         axis.title.y=element_text(angle=90, hjust = 1, size = 12),
+#         axis.title.x=element_text(vjust = 1, size = 12),
+#         legend.text  = element_blank(),
+#         legend.title=element_text(size = 12), 
+#         legend.key.height = unit(1, 'cm'),
+#         legend.key.width = unit(1, 'cm')) 
+#   
+# cyano_chi <- ggplot(dat_cyano_new1, aes(x = increase_decrease_mosaic, y = count, fill = increase_cyano)) + 
+#     geom_bar(position="stack", stat="identity")+ 
+#     xlab("") + ylab("") +
+#    geom_text(aes(label = count),
+#             position = position_stack(vjust = 0.5), 
+#             color = "black", 
+#             size = 6) + 
+# 
+#     scale_fill_manual(values = c("#b2ebf2", "#4dd0e1"), name = "Did cyanobacteria \nincrease?")+ 
+#   theme_bw() + 
+#     theme(axis.text.x = element_text(hjust = 0.5, size = 12),
+#         #axis.text.x = element_blank(),
+#         axis.text.y = element_text(hjust = 1, size = 12),
+#         axis.title.y=element_text(angle=90, hjust = 1, size = 12),
+#         axis.title.x=element_text(vjust = 1, size = 12),
+#         legend.text  = element_blank(),
+#         legend.title=element_text(size = 12), 
+#         legend.key.height = unit(1, 'cm'),
+#         legend.key.width = unit(1, 'cm')) 
+# 
+# chi <- phyto_chi / cyano_chi #+ plot_annotation(title = "Chi-Square") 
+# 
+# chi
+# 
+# ggsave("~/GitHubRepos/CareyLabVT/Powell/Systematic/Plots/chi.jpg", plot = chi, height = 5, width = 6.5, units = "in")
+```
+
+# Supplemental Figures
+logistic regression to prioritize increases or decreases. 
+```{r}
+cyanodecreasedata <- boxplotdata2 %>% 
+  select(prop_alldelta_wl_decrease, prop_alldelta_wl_increase, prop_delta_wl_priorityincrease, combined_cyano_response_increasepriority, combined_cyano_response_binary_increasepriority, name_yr) %>% 
+  filter(!is.na(prop_delta_wl_priorityincrease)) %>%
+  filter(!is.na(combined_cyano_response_binary_increasepriority)) %>% 
+  filter(prop_alldelta_wl_decrease<0) %>% 
+  rename(response_binaryincrease = combined_cyano_response_binary_increasepriority, 
+         response_increase = combined_cyano_response_increasepriority) %>% 
+  mutate(type = "cyano")
+
+cyanoincreasedata <- boxplotdata2 %>% 
+  select(prop_alldelta_wl_decrease, prop_alldelta_wl_increase, prop_delta_wl_priorityincrease, combined_cyano_response_increasepriority, combined_cyano_response_binary_increasepriority, name_yr) %>% 
+  filter(!is.na(prop_delta_wl_priorityincrease)) %>%
+  filter(!is.na(combined_cyano_response_binary_increasepriority)) %>% 
+  filter(prop_alldelta_wl_increase>0) %>% 
+  rename(response_binaryincrease = combined_cyano_response_binary_increasepriority, 
+         response_increase = combined_cyano_response_increasepriority) %>% 
+  mutate(type = "cyano")
+
+phytoincreasedata <- boxplotdata2 %>% 
+  select(prop_alldelta_wl_decrease, prop_alldelta_wl_increase, prop_delta_wl_priorityincrease, combined_phyto_response_increasepriority, combined_phyto_response_binary_increasepriority, name_yr) %>% 
+  filter(!is.na(prop_delta_wl_priorityincrease)) %>% 
+  filter(!is.na(combined_phyto_response_binary_increasepriority)) %>% 
+  filter(prop_alldelta_wl_increase>0) %>% 
+  rename(response_binaryincrease = combined_phyto_response_binary_increasepriority, 
+         response_increase = combined_phyto_response_increasepriority) %>% 
+  mutate(type = "phyto")
+
+phytodecreasedata <- boxplotdata2 %>% 
+  select(prop_alldelta_wl_decrease, prop_alldelta_wl_increase, prop_delta_wl_priorityincrease, combined_phyto_response_increasepriority, combined_phyto_response_binary_increasepriority, name_yr) %>% 
+  filter(!is.na(prop_delta_wl_priorityincrease)) %>% 
+  filter(!is.na(combined_phyto_response_binary_increasepriority)) %>% 
+  filter(prop_alldelta_wl_decrease<0) %>% 
+  rename(response_binaryincrease = combined_phyto_response_binary_increasepriority, 
+         response_increase = combined_phyto_response_increasepriority) %>% 
+  mutate(type = "phyto")
+  
+cyanodata <- boxplotdata2 %>% 
+  select(prop_delta_wl_priorityincrease, combined_cyano_response_increasepriority, combined_cyano_response_binary_increasepriority, name_yr, trophic_status_reduced) %>% 
+  filter(!is.na(prop_delta_wl_priorityincrease)) %>%
+  filter(!is.na(combined_cyano_response_binary_increasepriority)) %>% 
+  # filter(prop_delta_wl<0) %>% 
+  rename(response_binary = combined_cyano_response_binary_increasepriority, 
+         response = combined_cyano_response_increasepriority) %>% 
+  mutate(type = "cyano") |> 
+  mutate(wl_priority = "increase")
+
+phytodata <- boxplotdata2 %>% 
+  select(prop_delta_wl_priorityincrease, combined_phyto_response_increasepriority, combined_phyto_response_binary_increasepriority, name_yr, trophic_status_reduced) %>% 
+  filter(!is.na(prop_delta_wl_priorityincrease)) %>% 
+  filter(!is.na(combined_phyto_response_binary_increasepriority)) %>% 
+  # filter(prop_delta_wl<0) %>% 
+  rename(response_binary = combined_phyto_response_binary_increasepriority, 
+         response = combined_phyto_response_increasepriority) %>% 
+  mutate(type = "phyto")|> 
+  mutate(wl_priority = "increase")
+# logregdata <- rbind(cyanoincreasedata, cyanodecreasedata, phytoincreasedata, phytodecreasedata)
+logregdata_increase <- rbind(cyanodata, phytodata)
+#"#7A524B","#3C7F29","#8DBAE9"
+
+test <- logregdata_increase %>% ggplot(aes(x = prop_delta_wl_priorityincrease, y = response_binary, color = as.factor(type), shape = as.factor(type))) +
+  scale_color_manual(values = c("#4dd0e1", "#99bbab"), name = "")+
+  scale_shape_manual(values = c(8, 20)) +
+  geom_point(size = 3) +
+  geom_smooth(method = "glm", 
+              method.args = list(family = "binomial"),
+              se = FALSE, linewidth = 3) + 
+  #geom_jitter()+
+ ylab("Response to changes in water level") + 
+  xlab("Proportion water level change") + 
+  ggtitle("Priority WL increases") + 
+  theme_bw() +
+  theme(axis.text.x = element_text(hjust = 1, size = 10), 
+        axis.title.y=element_text(angle=90, vjust = .5, size = 12), 
+        legend.title=element_blank())
+test
+
+logregdata_phyto <- logregdata_increase %>% subset(type == "phyto")
+logregdata_cyano <- logregdata_increase %>% subset(type == "cyano")
+
+logregform_phyto <-  glm(formula=response_binary ~ prop_delta_wl_priorityincrease, data=logregdata_phyto, family=binomial)
+summary(logregform_phyto)
+
+logregform_cyano <-  glm(formula=response_binary ~ prop_delta_wl_priorityincrease, data=logregdata_cyano, family=binomial)
+summary(logregform_cyano)
+```
+
+## Logreg: decreases
+
+```{r wl decreases}
+cyanodecreasedata <- boxplotdata2 %>% 
+  select(prop_alldelta_wl_decrease, prop_alldelta_wl_increase, prop_delta_wl, combined_cyano_response, combined_cyano_response_binary, name_yr) %>% 
+  filter(!is.na(prop_delta_wl)) %>%
+  filter(!is.na(combined_cyano_response_binary)) %>% 
+  filter(prop_alldelta_wl_decrease<0) %>% 
+  rename(response_binary = combined_cyano_response_binary, 
+         response = combined_cyano_response) %>% 
+  mutate(type = "cyano")
+
+cyanoincreasedata <- boxplotdata2 %>% 
+  select(prop_alldelta_wl_decrease, prop_alldelta_wl_increase, prop_delta_wl, combined_cyano_response, combined_cyano_response_binary, name_yr) %>% 
+  filter(!is.na(prop_delta_wl)) %>%
+  filter(!is.na(combined_cyano_response_binary)) %>% 
+  filter(prop_alldelta_wl_increase>0) %>% 
+  rename(response_binary = combined_cyano_response_binary, 
+         response = combined_cyano_response) %>% 
+  mutate(type = "cyano")
+
+phytoincreasedata <- boxplotdata2 %>% 
+  select(prop_alldelta_wl_decrease, prop_alldelta_wl_increase, prop_delta_wl, combined_phyto_response, combined_phyto_response_binary, name_yr) %>% 
+  filter(!is.na(prop_delta_wl)) %>% 
+  filter(!is.na(combined_phyto_response_binary)) %>% 
+  filter(prop_alldelta_wl_increase>0) %>% 
+  rename(response_binary = combined_phyto_response_binary, 
+         response = combined_phyto_response) %>% 
+  mutate(type = "phyto")
+
+phytodecreasedata <- boxplotdata2 %>% 
+  select(prop_alldelta_wl_decrease, prop_alldelta_wl_increase, prop_delta_wl, combined_phyto_response, combined_phyto_response_binary, name_yr) %>% 
+  filter(!is.na(prop_delta_wl)) %>% 
+  filter(!is.na(combined_phyto_response_binary)) %>% 
+  filter(prop_alldelta_wl_decrease<0) %>% 
+  rename(response_binary = combined_phyto_response_binary, 
+         response = combined_phyto_response) %>% 
+  mutate(type = "phyto")
+  
+cyanodata <- boxplotdata2 %>% 
+  select(prop_delta_wl, combined_cyano_response, combined_cyano_response_binary, name_yr, trophic_status_reduced) %>% 
+  filter(!is.na(prop_delta_wl)) %>%
+  filter(!is.na(combined_cyano_response_binary)) %>% 
+  # filter(prop_delta_wl<0) %>% 
+  rename(response_binary = combined_cyano_response_binary, 
+         response = combined_cyano_response) %>% 
+  mutate(type = "cyano") |> 
+  mutate(wl_priority = "decrease")
+
+phytodata <- boxplotdata2 %>% 
+  select(prop_delta_wl, combined_phyto_response, combined_phyto_response_binary, name_yr, trophic_status_reduced) %>% 
+  filter(!is.na(prop_delta_wl)) %>% 
+  filter(!is.na(combined_phyto_response_binary)) %>% 
+  # filter(prop_delta_wl<0) %>% 
+  rename(response_binary = combined_phyto_response_binary, 
+         response = combined_phyto_response) %>% 
+  mutate(type = "phyto") |> 
+  mutate(wl_priority = "decrease")
+
+# logregdata <- rbind(cyanoincreasedata, cyanodecreasedata, phytoincreasedata, phytodecreasedata)
+logregdata_decrease <- rbind(cyanodata, phytodata)
+logregdata <- logregdata_decrease
+#"#7A524B","#3C7F29","#8DBAE9"
+
+test <- logregdata %>% ggplot(aes(x = prop_delta_wl, y = response_binary, color = as.factor(type), shape = as.factor(type))) +
+  scale_color_manual(values = c("#88CCEE", "#117733"), name = "")+
+  scale_shape_manual(values = c(8, 20)) +
+  geom_point(size = 3) +
+  geom_smooth(method = "glm", 
+              method.args = list(family = "binomial"),
+              se = FALSE, linewidth = 3) + 
+  #geom_jitter()+
+ ylab("Response to changes in water level") + 
+  xlab("Proportion water level change") + 
+  ggtitle("Priority WL decrease")+
+  theme_bw() +
+  theme(axis.text.x = element_text(hjust = 1, size = 10), 
+        axis.title.y=element_text(angle=90, vjust = .5, size = 12), 
+        legend.title=element_blank())
+test
+
+logregdata_phyto <- logregdata %>% subset(type == "phyto")
+logregdata_cyano <- logregdata %>% subset(type == "cyano")
+
+logregform_phyto <-  glm(formula=response_binary ~ prop_delta_wl, data=logregdata_phyto, family=binomial)
+summary(logregform_phyto)
+
+logregform_cyano <-  glm(formula=response_binary ~ prop_delta_wl, data=logregdata_cyano, family=binomial)
+summary(logregform_cyano)
+```
+
+
+
+```{r possible supplement figures}
+
+#countries by continent
+countries_sf <- data |> 
+  select(lat_dd, long_dd, res_name, cov_num, name_yr) |> 
+  filter(!is.na(lat_dd) & !is.na(long_dd)) |> 
+  st_as_sf(coords = c("long_dd", "lat_dd"), crs = 4326) 
+world <- ne_countries(scale = "medium", returnclass = "sf")
+df_with_country <- st_join(countries_sf, world["name_long"])
+df_final <- df_with_country %>% 
+  st_drop_geometry() %>%
+  rename(country = name_long)
+df_final <- df_final %>% 
+  mutate(continent = world$continent[match(country, world$name_long)])
+
+countries <- left_join(data, df_final, by = c("res_name", "cov_num", "name_yr")) |> select(c("res_name", "name_yr", "country.x", "country.y", "continent")) |> 
+  mutate(country.x = ifelse(country.x == "", NA, country.x)) |> 
+  mutate(country = ifelse(!is.na(country.x), country.x, country.y)) |> 
+  mutate(continent.a = case_when(
+    country %in% c("Brazil", "Argentina", "Uruguay", "Argentina and Uruguay") ~ "South America",
+      country %in% c("United States", "USA/Canada", "Canada", "Mexico") ~ "North America",
+      country %in% c("Portugal", "England", "Italy", "France", "Serbia", 
+                     "Estonia", "Estonia/Russia") ~ "Europe",
+      country %in% c("Russia") ~ "Europe/Asia",
+      country %in% c("China", "Taiwan", "Malaysia", "Mongolia", "Lebanon",
+                     "Cambodia", "Vietnam") ~ "Asia",
+       country %in% c("Australia") ~ "Oceania",
+    country %in% c("South Africa") ~ "Africa",
+      TRUE ~ NA_character_)) |> 
+  mutate(continent = ifelse(!is.na(continent.a), continent.a, continent)) |> 
+  select(res_name, country, continent) |> 
+  unique()
+
+countries |> 
+  filter(!is.na(continent)) |> 
+  ggplot(aes(x=continent))+
+  geom_bar() + 
+  xlab("Continent") +
+  ylab("Number of reservoirs") + 
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 45, vjust = 0.5, hjust=1))+
+  geom_text(aes(label = ..count..), stat = "count", vjust = 1.5, size = 5, colour = "black")
+
+#histogram of maxdepths
+
+data |> 
+  subset(!is.na(fullpond_maxdepth)) %>% 
+  ggplot(aes(x=fullpond_maxdepth)) + 
+  geom_histogram() +
+  xlab("Max depth at Full Pond") +
+  ylab("Number of reservoirs") + 
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+
+```
+
+Old mapping figures
+
+```{r old maps}
+latlong %>% 
+  subset(!is.na(long_dd)) %>% 
+  subset(!is.na(lat_dd)) |> 
+  mapview(xcol = "long_dd", ycol = "lat_dd", crs = 4269, grid = FALSE)
+
+latlong |> 
+  filter(lat_dd > 80)
+
+litmap <- latlong %>% 
+  subset(!is.na(long_dd)) %>% 
+  mapview(xcol = "long_dd", ycol = "lat_dd", crs = 4269, grid = FALSE)
+
+world <- ne_countries(scale = "medium", returnclass = "sf")
+#world <- map_data("world")
+my_countries <- c("Russia", "South Korea", "China", "Brazil", "Spain", "United States of America", "Burkina Faso", "Argentina", "Lebanon", "Vietnam", "Canada", "Israel", "Croatia", "Netherlands", "Estonia", "Italy", "Turkey", "Germany")
+
+new_world <- mutate(world, fill = ifelse(sovereignt %in% c(my_countries), "yes", "no"))
+
+litdata_map <- latlong %>% 
+  mutate(decrease_phyto_response = ifelse(decrease_phyto_response == "Not measured", NA, decrease_phyto_response), 
+         increase_phyto_response = ifelse(increase_phyto_response == "Not measured", NA, increase_phyto_response), 
+         decrease_cyano_response = ifelse(decrease_cyano_response == "Not measured", NA, decrease_cyano_response), 
+         increase_cyano_response = ifelse(increase_cyano_response == "Not measured", NA, increase_cyano_response)) |> 
+   mutate(mapvals = ifelse(((!is.na(decrease_phyto_response)|!is.na(increase_phyto_response)) & (!is.na(decrease_cyano_response)|!is.na(increase_cyano_response))), "Both",
+                           ifelse(!is.na(decrease_phyto_response)|!is.na(increase_phyto_response), "Phytoplankton", 
+                                 ifelse(!is.na(decrease_cyano_response)|!is.na(increase_cyano_response), "Cyanobacteria", NA)))) 
+
+litdata_map_sf <- st_as_sf(litdata_map,
+                           coords = c("long_dd", "lat_dd"),
+                           crs = 4326,
+                           remove = FALSE)
+
+new_world <- st_transform(new_world, 4326)
+
+sitemap <- new_world %>% ggplot(fill = fill) +
+    geom_sf(data = new_world, aes(fill = factor(fill))) +
+ # coord_sf(crs = 4269) +
+  scale_fill_manual(values = c("white", "#88CCEE"), name = "Countries")+
+    geom_point(data = litdata_map_sf, aes(x = long_dd, y = lat_dd, shape = as.factor(mapvals), color = as.factor(mapvals)), size = 2) + 
+  scale_color_manual(values = c("black", "black", "#CC6677", "black", "black"), name = "Variable") +
+  scale_shape_manual(values = c(16, 16, 18, 16, 16), name = "Variable")+
+  ylab("Latitude") +
+  xlab("Longitude") +
+    theme(text = element_text(size = 12),
+        axis.text.x = element_text(hjust = 1, size = 12),
+        axis.title.y=element_text(angle=0, vjust = .5))+
+  theme_bw() +
+    theme(text = element_text(size = 12),
+        axis.text.x = element_text(hjust = 1, size = 12),
+        axis.title.y=element_text(angle=90, vjust = .5),
+        legend.position="none")
+library(scales)
+
+
+# ggplot(data = world, aes(x = long, y = lat, group = group), fill = "white") + 
+#   geom_polygon(fill = "white", color = "black")+
+#   geom_sf(data = litdata_map_sf,
+#           aes(shape = as.factor(mapvals),
+#               color = as.factor(mapvals)),
+#           size = 2)
+
+sitemap <- ggplot(world) +
+  geom_sf(fill = "white") +
+ # coord_sf(crs = 4269) +
+  #scale_fill_manual(aesthetics = "white", color = "black") +
+  #geom_sf_label(stat = "sf_coordinates")+
+  geom_sf(data = litdata_map_sf,
+          aes(shape = as.factor(mapvals),
+              color = as.factor(mapvals)),
+          size = 2) +
+  #scale_fill_manual(values = c("white", "#88CCEE"), name = "Countries") +
+  scale_color_manual(values = c("#608687", "#4dd0e1", "darkgreen"),
+                     name = "Variable") +
+  scale_shape_manual(values = c(16, 17, 18),
+                     name = "Variable")  +
+  coord_sf() +
+  theme_minimal()
+sitemap
+
+sitemap_depth <- ggplot(world) +
+  geom_sf(data = world, fill = "white") +
+  #coord_sf(crs = 4269) +
+  #scale_fill_manual(aesthetics = "white") +
+  #geom_sf_label(stat = "sf_coordinates")+
+  geom_sf(data = litdata_map_sf,
+          aes(shape = as.factor(mapvals),
+              color = as.factor(mapvals), 
+              size = (depth_m))) +
+  #scale_fill_manual(values = c("white", "#88CCEE"), name = "Countries") +
+  scale_color_manual(values = c("#608687", "#4dd0e1", "darkgreen"),
+                     name = "Variable") +
+  scale_shape_manual(values = c(16, 17, 18),
+                     name = "Variable")  +
+  theme_minimal()
+
+sitemap_depth
+
+sitemap_trophic <- ggplot(world) +
+  geom_sf(data = world, fill = "white") +
+  #coord_sf(crs = 4269) +
+  #scale_fill_manual(aesthetics = "white") +
+  #geom_sf_label(stat = "sf_coordinates")+
+  # geom_sf(data = litdata_map_sf,
+  #         aes(shape = as.factor(mapvals),
+  #             color = as.factor(increase_decrease_mosaic))) +
+    geom_sf(data = litdata_map_sf, size = 3, alpha = 0.6,
+          aes(color = as.factor(increase_decrease_mosaic))) +
+  #scale_fill_manual(values = c("white", "#88CCEE"), name = "Countries") +
+  scale_color_manual(values = c("lightgreen", "darkgreen", "blue", "blue"),
+                     name = "Was it a \nwater level \nincrease or \ndecrease? \n") +
+  scale_shape_manual(values = c(16, 17, 18),
+                     name = "Variable")  +
+  theme_minimal() + 
+  guides(colour = guide_legend(override.aes = list(size=6))) +
+  theme(legend.text  = element_text(size = 16),
+        legend.title = element_text(size = 20))
+sitemap_trophic
+# ggsave("~/GitHubRepos/CareyLabVT/Powell/Systematic/Plots/sitemap.jpg", plot = sitemap, height = 4, width = 6.5, units = "in")
+
+ggsave("~/GitHubRepos/CareyLabVT/Powell/Systematic/Plots/sitemapposter.jpg", plot = sitemap_trophic, height = 4, width = 10, units = "in")
+```
+
+Old code that includes all vars for drivers
+```{r}
+#separate out phytoplankton and cyanobacteria drivers
+phyto_only_drivers <- drivers |> 
+  select(c(1:3, increase_phyto_response, increase_cyano_response, decrease_phyto_response, decrease_cyano_response, tp, 90:125)) |> 
+  filter(increase_phyto_response != "" & increase_phyto_response != "Not measured" | decrease_phyto_response != "" & decrease_phyto_response != "Not measured")
+
+cyano_only_drivers <- drivers |> 
+  select(c(1:3, increase_phyto_response, increase_cyano_response, decrease_phyto_response, decrease_cyano_response, tp, 90:125)) |> 
+  filter(increase_cyano_response != "" & increase_cyano_response != "Not measured" | decrease_cyano_response != "" & decrease_cyano_response != "Not measured")
+
+#WL change vars
+phyto_only_WLchangevars <- WLchangevars |> 
+  select(c(1:3, increase_phyto_response, increase_cyano_response, decrease_phyto_response, decrease_cyano_response, tp, 90:120)) |> 
+  filter(increase_phyto_response != "" & increase_phyto_response != "Not measured" | decrease_phyto_response != "" & decrease_phyto_response != "Not measured")
+
+cyano_only_WLchangevars <- WLchangevars |> 
+  select(c(1:3, increase_phyto_response, increase_cyano_response, decrease_phyto_response, decrease_cyano_response, tp, 90:120)) |> 
+  filter(increase_cyano_response != "" & increase_cyano_response != "Not measured" | decrease_cyano_response != "" & decrease_cyano_response != "Not measured")
+
+#not WL change vars!
+phyto_only_vars <- spreadvars |> 
+  select(c(1:3, increase_phyto_response, increase_cyano_response, decrease_phyto_response, decrease_cyano_response, tp, 90:124)) |> 
+  filter(increase_phyto_response != "" & increase_phyto_response != "Not measured" | decrease_phyto_response != "" & decrease_phyto_response != "Not measured")
+
+cyano_only_vars <- spreadvars |> 
+  select(c(1:3, increase_phyto_response, increase_cyano_response, decrease_phyto_response, decrease_cyano_response, tp, 90:124)) |> 
+  filter(increase_cyano_response != "" & increase_cyano_response != "Not measured" | decrease_cyano_response != "" & decrease_cyano_response != "Not measured")
+
+
+#many regerts
+chemvars_drive_phytos <- phyto_only_drivers |> select(c(other_chem, tp, tn, nh4, ph, do, srp, no3, cond, metals, orp, no2, doc, din, ph, salinity, dic, tkn, dom, pom))
+
+#only including variables that were measured at least 10 times in the extracted data
+chemvars_phytos <- phyto_only_vars |> select(c(other_chem, tp, tn, nh4, ph, do, srp, no3, cond, metals, orp, no2, doc, din, ph, salinity, dic, tkn, dom, pom))
+
+physvars_drive_phytos <- phyto_only_drivers |> select(c(water_level, water_temp, transparency, turb, light, tss_tds, other_phys))
+
+# physvarsWL_phytos <- phyto_only_WLchangevars |> select(c(water_temp, transparency, turb, light, tss_tds, other_phys, strat, restime, flush_discharge, inflow, precip, air_temp))
+
+physvars_phytos <- phyto_only_vars |> select(c(water_temp, water_level, transparency, turb, light, tss_tds, other_phys))
+# summary(vars) 
+
+freqchem_drive_phytos <- as.data.frame(colSums(chemvars_drive_phytos))
+chemvars_drive_phytos <- setNames(cbind(rownames(freqchem_drive_phytos), freqchem_drive_phytos, row.names = NULL), 
+         c("names", "sum"))
+# freqchemWL_phyto <- as.data.frame(colSums(chemvarsWL_phytos))
+freqchem_phyto <- as.data.frame(colSums(chemvars_phytos))
+# chemvarsWL_phytos <- setNames(cbind(rownames(freqchemWL), freqchemWL_phyto, row.names = NULL), 
+#          c("names", "sum"))
+chemvars_phytos <- setNames(cbind(rownames(freqchem_phyto), 
+                                  freqchem_phyto, row.names = NULL), c("names", "sum"))
+
+# chemvarsWL |> ggplot(aes(x = names, y = sum)) + geom_bar(stat = "identity") + 
+#   theme(axis.text.x = element_text(angle = 45, vjust = 0.5, hjust=1)) +  ggtitle("Chem variables that changed in response to WL")
+# want a comparison with what was measured!
+chemvars1_phytos <- chemvars_phytos |> 
+  rename(measured = sum, 
+         name = names)
+chemicalvars_phytos <- cbind(chemvars1_phytos, chemvars_drive_phytos)
+
+chem <- chemicalvars_phytos |> 
+  filter(!name == "other_chem") |> 
+  select(c(names, measured, sum)) |> 
+  rename(id = sum) |> 
+  mutate(notid = measured - id) |> 
+  select(c(names, id, notid)) |> 
+  pivot_longer(!names, names_to = "driver", values_to = "count") |> 
+  ggplot(aes(fill = driver, y = count, x = names))+
+  geom_bar(position = "fill", stat = "identity") + 
+  ggtitle("Chem variables, phytos only" ) + 
+  geom_text(aes(label = count),
+            position = position_fill(vjust = 0.5), 
+            color = "black", 
+            size = 3) + 
+  scale_fill_manual(values = c("#fba049","#d2d2fe"))+ theme_bw()
+
+#physical variables
+
+freqphys_drive <- as.data.frame(colSums(physvars_drive_phytos))
+# freqphysWL <- as.data.frame(colSums(physvarsWL_phytos))
+freqphys_phytos <- as.data.frame(colSums(physvars_phytos))
+
+physvars2_drive_phytos <- setNames(cbind(rownames(freqphys_drive), freqphys_drive, row.names = NULL), 
+         c("names", "sum"))
+
+physvars1_phytos <- setNames(cbind(rownames(freqphys_phytos), freqphys_phytos, row.names = NULL), 
+         c("name", "measured"))
+
+# physvars2WL <- setNames(cbind(rownames(freqphysWL), freqphysWL, row.names = NULL), 
+#          c("names", "sum"))
+
+# physvars2_drive_phytos |> ggplot(aes(x = names, y = sum)) + geom_bar(stat = "identity") + 
+#   theme(axis.text.x = element_text(angle = 45, vjust = 0.5, hjust=1)) + ggtitle("Phys variable Drivers")
+
+# physvars2WL |> ggplot(aes(x = names, y = sum)) + geom_bar(stat = "identity") + 
+#   theme(axis.text.x = element_text(angle = 45, vjust = 0.5, hjust=1)) + 
+#   ggtitle("Phys variable that change with water level")
+
+
+# physvars1 <- freqphys_phytos |> 
+#   rename(measured = sum, 
+#          name = names)
+
+physvars_phytos <- cbind(physvars1_phytos, physvars2_drive_phytos)
+
+phys <- physvars_phytos |> 
+    select(c(names, measured, sum)) |> 
+  filter(!names == "other_phys") |> 
+  rename(id = sum) |> 
+  mutate(notid = measured - id) |> 
+  select(c(names, id, notid)) |> 
+  mutate(notid = ifelse(notid <0, 0, notid)) |> 
+  pivot_longer(!names, names_to = "driver", values_to = "count") |> 
+  ggplot(aes(fill = driver, y = count, x = names)) +
+  geom_bar(position = "fill", stat = "identity") +
+  # theme(axis.text.x = element_text(angle = 45, vjust = 0.5, hjust=1)) + 
+  theme(axis.text.x = element_text(vjust = 0.5, hjust=1)) + 
+  ggtitle("Phys variables, phyto only") + 
+  geom_text(aes(label = count),
+            position = position_fill(vjust = 0.5), 
+            color = "black", 
+            size = 3) + 
+  scale_fill_manual(values = c("#fba049","#d2d2fe"))
+
+phytos <- phys/chem
+phytos
+ggsave("~/GitHubRepos/CareyLabVT/Powell/Systematic/Plots/phytovars.jpg", plot = phytos, height = 5, width = 6.5, units = "in")
+```
+
+Code for variables that changed with water level change
+```{r}
+chemvars1 <- chemvars |> 
+  rename(measured = sum, 
+         name = names)
+chemicalvars <- cbind(chemvars1, chemvars_drive)
+chemvarsplot <- chemicalvars |> 
+  select(c(names, measured, sum)) |> 
+  rename(id = sum) |> 
+  mutate(notid = measured - id) |> 
+  select(c(names, id, notid)) |> 
+   filter(!names == c("other_chem")) |>
+  pivot_longer(!names, names_to = "driver", values_to = "count") |> 
+  ggplot(aes(fill = driver, y = count, x = names))+
+  geom_bar(position = "fill", stat = "identity") + 
+  ggtitle("Proportion Chemical variables that were identified as drivers" ) + 
+  geom_text(aes(label = count),
+            position = position_fill(vjust = 0.5), 
+            color = "black", 
+            size = 3) + 
+  scale_fill_manual(values = c("#fba049","#d2d2fe"))
+
+chemicalvars |> 
+  select(c(names, measured, sum)) |> 
+  rename(id = sum) |> 
+  mutate(notid = measured - id) |> 
+  select(c(names, id, notid)) |> 
+  pivot_longer(!names, names_to = "driver", values_to = "count") |> 
+  ggplot(aes(fill = driver, y = count, x = names))+
+  geom_bar(position = "stack", stat = "identity") + 
+  scale_fill_manual(values = c("#fba049","#d2d2fe"))
+
+physvars1 <- physvars |> 
+  rename(measured = sum, 
+         name = names)
+
+physvars <- cbind(physvars1, physvars2_drive)
+
+physvars |> 
+  select(c(names, measured, sum)) |> 
+  rename(id = sum) |> 
+  mutate(notid = measured - id) |> 
+  select(c(names, id, notid)) |> 
+  mutate(notid = ifelse(notid <0, 0, notid)) |> 
+   filter(!names == c("other_phys")) |>
+  pivot_longer(!names, names_to = "driver", values_to = "count") |> 
+  ggplot(aes(fill = driver, y = count, x = names)) +
+  geom_bar(position = "stack", stat = "identity") +
+  theme(axis.text.x = element_text(angle = 45, vjust = 0.5, hjust=1)) + 
+  ggtitle("Phys variables") + 
+  scale_fill_manual(values = c("#fba049","#d2d2fe"))
+
+physvarsplot <- physvars |> 
+  select(c(names, measured, sum)) |> 
+  rename(id = sum) |> 
+  mutate(notid = measured - id) |> 
+  select(c(names, id, notid)) |> 
+  mutate(notid = ifelse(notid <0, 0, notid)) |> 
+  pivot_longer(!names, names_to = "driver", values_to = "count") |> 
+  ggplot(aes(fill = driver, y = count, x = names)) +
+  geom_bar(position = "fill", stat = "identity") +
+  theme(axis.text.x = element_text(angle = 45, vjust = 0.5, hjust=1)) + 
+  ggtitle("Phys variables") + 
+  geom_text(aes(label = count),
+            position = position_fill(vjust = 0.5), 
+            color = "black", 
+            size = 3)  + 
+  scale_fill_manual(values = c("#fba049","#d2d2fe"))
+
+chemvars1 <- chemvars |> 
+  rename(measured = sum, 
+         name = names)
+chemicalvarsWL <- cbind(chemvars1, chemvarsWL)
+WL_chem <- chemicalvarsWL |> 
+  select(c(names, measured, sum)) |> 
+  rename(change = sum) |> 
+  mutate(nochange = measured - change) |> 
+  select(c(names, change, nochange)) |> 
+  filter(!names == c("other_chem")) |>
+  pivot_longer(!names, names_to = "driver", values_to = "count") |> 
+  ggplot(aes(fill = driver, y = count, x = names))+
+  geom_bar(position = "fill", stat = "identity") + 
+  ggtitle("Proportion Chemical variables that changed with WL change" ) + 
+  geom_text(aes(label = count),
+            position = position_fill(vjust = 0.5), 
+            color = "black", 
+            size = 3)+ 
+  scale_fill_manual(values = c("#fba049","#d2d2fe"))
+
+
+# physvars1 <- physvars1 |> 
+#   rename(measured = sum, 
+#          name = names)
+
+physvars_wl_spec <- physvars1 |> 
+  filter(name != "water_level")
+physicalvarsWL <- cbind(physvars_wl_spec, physvars2WL)
+
+wl_phys <- physicalvarsWL |> 
+  select(c(names, measured, sum)) |> 
+  filter(!names == c("other_phys", "restime")) |> 
+  rename(change = sum) |> 
+  mutate(nochange = measured - change) |> 
+  select(c(names, change, nochange)) |> 
+  pivot_longer(!names, names_to = "driver", values_to = "count") |> 
+  ggplot(aes(fill = driver, y = count, x = names))+
+  geom_bar(position = "fill", stat = "identity") + 
+  ggtitle("Proportion physical variables that changed with WL change" ) + 
+    theme(axis.text.x = element_text(angle = 45, vjust = 0.5, hjust=1)) + 
+  geom_text(aes(label = count),
+            position = position_fill(vjust = 0.5), 
+            color = "black", 
+            size = 3) + 
+  scale_fill_manual(values = c("#fba049","#d2d2fe"))
+varsplot <- physvarsplot/chemvarsplot
+deltawl <- wl_phys/WL_chem
+(wl_phys + WL_chem) / (physvarsplot+chemvarsplot)
+# chemicalvarsWL |> 
+#   select(c(names, measured, sum)) |> 
+#   rename(change = sum) |> 
+#   mutate(nochange = measured - change) |> 
+#   select(c(names, change, nochange)) |> 
+#   pivot_longer(!names, names_to = "driver", values_to = "count") |> 
+#   ggplot(aes(fill = driver, y = count, x = names))+
+#   geom_bar(position = "stack", stat = "identity") + geom_text(aes(label = count),
+#             position = position_stack(vjust = 0.5), 
+#             color = "white", 
+#             size = 3)
+ggsave("~/GitHubRepos/CareyLabVT/Powell/Systematic/Plots/varswlchange.jpg", plot = deltawl, height = 5, width = 6.5, units = "in")
+ggsave("~/GitHubRepos/CareyLabVT/Powell/Systematic/Plots/vars.jpg", plot = varsplot, height = 5, width = 6.5, units = "in")
+
+```
+
+
+# phyto drivers for WL decreases.
+I don't think this actually adds much more info, so have abandoned this for now. Also, while we can distinguish the difference between increases and decreases in WL, so many studies had both an increase and a decrease that I don't think we can effectively differentiate. 
+```{r WL change}
+phyto_only_drivers_up <- drivers |> 
+  select(c(1:3, increase_phyto_response, increase_cyano_response, decrease_phyto_response, decrease_cyano_response, tp, 90:120)) |> 
+  filter(increase_phyto_response != "" & increase_phyto_response != "Not measured")
+
+phyto_only_drivers_down <- drivers |> 
+  select(c(1:3, increase_phyto_response, increase_cyano_response, decrease_phyto_response, decrease_cyano_response, tp, 90:120)) |> 
+filter(!decrease_phyto_response %in% c("", "Not measured") &
+   increase_phyto_response %in% c("", "Not measured"))
+
+phyto_only_down <- phyto_only_vars |> 
+  #select(c(1:3, increase_phyto_response, increase_cyano_response, decrease_phyto_response, decrease_cyano_response, tp, 90:120)) |> 
+filter(!decrease_phyto_response %in% c("", "Not measured") &
+   !increase_phyto_response %in% c("", "Not measured"))
+
+chemvars_drive_phyto_down <- phyto_only_drivers_down |> select(c(cond, do, nh4, no2, no3, ph, srp, tn, tp))
+
+chemvars_phyto_down <- phyto_only_down |> select(c(cond, do, nh4, no2, no3, ph, srp, tn, tp))
+
+physvars_drive_phytos_down <- phyto_only_drivers_down |> select(c(water_level, water_temp, transparency, turb, light, tss_tds))
+
+physvars_phytos_down <- phyto_only_down |> select(c(water_temp, transparency, turb, light, tss_tds, water_level))
+
+#add plots for phytos down
+
+freqchem_drive_phytos_down <- as.data.frame(colSums(chemvars_drive_phyto_down))
+chemvars_drive_phytos_down <- setNames(cbind(rownames(freqchem_drive_phytos_down), freqchem_drive_phytos_down, row.names = NULL), 
+         c("names", "sum"))
+# freqchemWL_phyto <- as.data.frame(colSums(chemvarsWL_phytos))
+freqchem_phyto_down <- as.data.frame(colSums(chemvars_phyto_down))
+# chemvarsWL_phytos <- setNames(cbind(rownames(freqchemWL), freqchemWL_phyto, row.names = NULL), 
+#          c("names", "sum"))
+chemvars_phytos_down <- setNames(cbind(rownames(freqchem_phyto_down), 
+                                  freqchem_phyto_down, row.names = NULL), c("names", "sum"))
+
+# chemvarsWL |> ggplot(aes(x = names, y = sum)) + geom_bar(stat = "identity") + 
+#   theme(axis.text.x = element_text(angle = 45, vjust = 0.5, hjust=1)) +  ggtitle("Chem variables that changed in response to WL")
+# want a comparison with what was measured!
+chemvars1_phytos_down <- chemvars_phytos_down |> 
+  rename(measured = sum, 
+         name = names)
+
+# drivers identified out of all vars measured
+chemicalvars_phytos_down <- cbind(chemvars1_phytos_down, chemvars_drive_phytos_down)
+
+chem <- chemicalvars_phytos_down |> 
+  filter(!name == "other_chem") |> 
+  select(c(names, measured, sum)) |> 
+  rename(id = sum) |> 
+  mutate(notid = measured - id) |> 
+  select(c(names, id, notid)) |> 
+  pivot_longer(!names, names_to = "driver", values_to = "count") |> 
+  ggplot(aes(fill = driver, y = count, x = names))+
+  geom_bar(position = "fill", stat = "identity") + 
+  ggtitle("Chem variable drivers, phytoplankton only, WL decreases only" ) + 
+  geom_text(aes(label = count),
+            position = position_fill(vjust = 0.5), 
+            color = "black", 
+            size = 3) + 
+  scale_fill_manual(values = c("#99bbab", "#ddefcd"))+ theme_bw()
+
+#physical variables
+
+freqphys_drive_down <- as.data.frame(colSums(physvars_drive_phytos_down))
+# freqphysWL <- as.data.frame(colSums(physvarsWL_phytos))
+freqphys_phytos_down <- as.data.frame(colSums(physvars_phytos_down))
+
+physvars2_drive_phytos <- setNames(cbind(rownames(freqphys_drive_down), freqphys_drive_down, row.names = NULL), 
+         c("names", "sum"))
+
+physvars1_phytos <- setNames(cbind(rownames(freqphys_phytos_down), freqphys_phytos_down, row.names = NULL), 
+         c("name", "measured"))
+
+physvars_phytos <- cbind(physvars1_phytos, physvars2_drive_phytos)
+
+phys <- physvars_phytos |> 
+    select(c(names, measured, sum)) |> 
+  filter(!names == "other_phys") |> 
+  rename(id = sum) |> 
+  mutate(notid = measured - id) |> 
+  select(c(names, id, notid)) |> 
+  mutate(notid = ifelse(notid <0, 0, notid)) |> 
+  pivot_longer(!names, names_to = "driver", values_to = "count") |> 
+  ggplot(aes(fill = driver, y = count, x = names)) +
+  geom_bar(position = "fill", stat = "identity") +
+  # theme(axis.text.x = element_text(angle = 45, vjust = 0.5, hjust=1)) + 
+  theme(axis.text.x = element_text(vjust = 0.5)) + 
+  ggtitle("Phys variable drivers, phytoplankton only") + 
+  geom_text(aes(label = count),
+            position = position_fill(vjust = 0.5), 
+            color = "black", 
+            size = 3) + 
+  scale_fill_manual(values = c("#99bbab", "#ddefcd"))
+
+phytos <- phys/chem
+phytos
+ggsave("~/GitHubRepos/CareyLabVT/Powell/Systematic/Plots/phytovars.jpg", plot = phytos, height = 5, width = 6.5, units = "in")
+
+
+```
